@@ -5,8 +5,6 @@ from pathlib import Path
 # ============================================================
 # 0. 文件路径
 # ============================================================
-# VS Code 本地环境使用相对路径；优先读取项目根目录文件，
-# 如果后续整理到 data 文件夹，也可以自动兼容。
 
 input_candidates = [
     Path("original_data_english.csv"),
@@ -17,8 +15,6 @@ output_dir = Path("output")
 output_dir.mkdir(exist_ok=True)
 
 output_path = output_dir / "pet_data_clean_all_variables.csv"
-# missing_report_path = output_dir / "missing_value_report.csv"
-
 
 # ============================================================
 # 1. 读取数据
