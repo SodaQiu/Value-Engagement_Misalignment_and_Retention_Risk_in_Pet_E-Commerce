@@ -8,7 +8,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-
+# 以下变量均为数值变量 可直接进入模型
 NUMERIC_FEATURES = [
     "review_written_yn",
     "push_notification_consent_yn",
@@ -33,6 +33,7 @@ NUMERIC_FEATURES = [
     "delivery_time_std"
 ]
 
+# one-hot encoding变量
 CATEGORICAL_FEATURES = [
     "first_purchase_quarter",
     "first_purchase_season",
@@ -47,6 +48,7 @@ FEATURES = (
     + CATEGORICAL_FEATURES
 )
 
+# 变量不一定全部直接进入模型 部分用于构造新变量
 REQUIRED_COLS = [
     "survive_yn",
     "days_to_third_purchase_from_signup",
@@ -88,6 +90,7 @@ BINARY_COLS = [
     "pet_registered_before_first_purchase_yn"
 ]
 
+# 不能为负数的变量
 NONNEGATIVE_NUMERIC_COLS = [
     "order_unit_price",
     "pet_age_months",
