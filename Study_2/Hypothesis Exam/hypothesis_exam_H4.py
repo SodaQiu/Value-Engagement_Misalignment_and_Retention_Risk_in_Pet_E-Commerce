@@ -11,7 +11,7 @@ STUDY_2_DIR = Path(__file__).resolve().parents[1]
 if str(STUDY_2_DIR) not in sys.path:
     sys.path.append(str(STUDY_2_DIR))
 
-from H3_H4_quadrant_utils import load_hvle_data
+from quadrant_utils import load_hvle_data
 
 
 def test_h4_purchase_structure(hv_df, structure_col="purchase_structure"):

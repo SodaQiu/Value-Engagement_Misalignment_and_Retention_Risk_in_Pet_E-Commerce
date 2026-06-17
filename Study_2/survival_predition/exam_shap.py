@@ -23,7 +23,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.append(str(SCRIPT_DIR))
 
-from exam import (
+from survival_exam import (
     RANDOM_STATE,
     build_hvle_retention_features,
     build_preprocessor,
