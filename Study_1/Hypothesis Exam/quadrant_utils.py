@@ -46,7 +46,7 @@ def load_hypothesis_data(file_path=None):
     # ========================================================
 
     if file_path is None:
-        base_dir = Path(__file__).resolve().parents[1]
+        base_dir = Path(__file__).resolve().parents[2]
 
         file_path = (
             base_dir
@@ -190,7 +190,7 @@ def load_hypothesis_data(file_path=None):
     # 9. Define high-value threshold within analysis sample
     # ========================================================
 
-    value_threshold = (
+    analysis_value_threshold = (
         analysis_df[
             "order_unit_price"
         ]
@@ -200,7 +200,7 @@ def load_hypothesis_data(file_path=None):
     analysis_df["high_value"] = (
         analysis_df[
             "order_unit_price"
-        ] >= value_threshold
+        ] >= analysis_value_threshold
     ).astype(int)
 
     # ========================================================
@@ -268,7 +268,7 @@ def load_hypothesis_data(file_path=None):
     )
     print(
         "Value median:",
-        value_threshold
+        analysis_value_threshold
     )
 
     print("\nEngagement summary:")
@@ -308,7 +308,7 @@ def load_hypothesis_data(file_path=None):
 
         # Summary statistics
         "engagement_summary": engagement_summary,
-        "value_threshold": value_threshold,
+        "analysis_value_threshold": analysis_value_threshold,
 
         # Metadata
         "file_path": file_path,

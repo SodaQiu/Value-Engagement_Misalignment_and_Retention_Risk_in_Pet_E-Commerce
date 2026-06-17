@@ -51,7 +51,7 @@ def load_hvle_data(file_path=None):
         df["churn_yn"] = 1 - pd.to_numeric(df["survive_yn"], errors="coerce")
 
     # 需要的变量
-    cols = [
+    required_cols = [
         "days_to_third_purchase_from_signup",
         "days_from_second_to_third_purchase",
         "order_unit_price",
@@ -62,7 +62,17 @@ def load_hvle_data(file_path=None):
         *PURCHASE_CATEGORY_COLS
     ]
 
-    missing = [c for c in cols if c not in df.columns]
+    # H5 uses these fields when they are available. Keep them out of the
+    # required dropna subset so H3/H4 samples remain unchanged.
+    optional_cols = [
+        "pet_species",
+        "days_to_first_purchase_from_signup",
+        "days_from_first_to_second_purchase"
+    ]
+
+    cols = required_cols + [c for c in optional_cols if c in df.columns]
+
+    missing = [c for c in required_cols if c not in df.columns]
     if missing:
         raise ValueError(f"Missing columns: {missing}")
 
@@ -88,7 +98,7 @@ def load_hvle_data(file_path=None):
     ].copy()
 
     # 保留 H3/H4 所需有效样本
-    analysis_df = df[cols].dropna().copy()
+    analysis_df = df[cols].dropna(subset=required_cols).copy()
     analysis_df = analysis_df[analysis_df["order_unit_price"] > 0].copy()
 
     analysis_df["purchase_structure"] = analysis_df.apply(
