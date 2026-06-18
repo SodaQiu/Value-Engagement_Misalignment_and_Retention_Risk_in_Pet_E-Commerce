@@ -566,7 +566,6 @@ def build_hvle_retention_features(file_path=None):
 
     candidate_features = [
         # monetary value
-        "order_unit_price",
         "log_order_unit_price",
 
         # timing
@@ -577,7 +576,6 @@ def build_hvle_retention_features(file_path=None):
 
         # pet information
         "pet_age_months",
-        "pet_age_group",
         "pet_species",
         "pet_registered_before_first_purchase_yn",
 

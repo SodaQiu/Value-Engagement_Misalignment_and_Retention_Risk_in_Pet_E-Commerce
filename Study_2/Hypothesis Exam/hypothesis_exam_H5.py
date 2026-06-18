@@ -69,8 +69,7 @@ def test_h5_pet_species(hv_df):
 
     required_cols = [
         "HVLE_yn",
-        "pet_species",
-        "order_unit_price"
+        "pet_species"
     ]
 
     missing = [c for c in required_cols if c not in df.columns]
@@ -81,27 +80,6 @@ def test_h5_pet_species(hv_df):
     df["pet_species_label"] = pet_species_to_label(df["pet_species"])
     df = df[df["pet_species_label"].isin(["cat", "dog"])].copy()
     df["pet_species_label"] = df["pet_species_label"].astype("category")
-
-    if "purchase_structure_binary" not in df.columns and "purchase_structure" in df.columns:
-        df["purchase_structure_binary"] = np.where(
-            df["purchase_structure"] == "multi_category",
-            "multi_category",
-            "single_category"
-        )
-
-    if (
-        "days_between_purchase_mean" not in df.columns
-        and "days_from_first_to_second_purchase" in df.columns
-        and "days_from_second_to_third_purchase" in df.columns
-    ):
-        df["days_between_purchase_mean"] = df[
-            [
-                "days_from_first_to_second_purchase",
-                "days_from_second_to_third_purchase"
-            ]
-        ].mean(axis=1)
-
-    df["log_order_unit_price"] = np.log1p(df["order_unit_price"])
 
     print("=" * 70)
     print("=== H5: Pet Species and HVLE Formation ===")
@@ -180,48 +158,8 @@ def test_h5_pet_species(hv_df):
     print("\nUnadjusted logistic regression odds ratios:")
     print(unadjusted_or_table.round(4).to_string(index=False))
 
-    # --------------------------------------------------------
-    # 4. Logistic regression: adjusted model
-    # --------------------------------------------------------
-
-    candidate_controls = [
-        "log_order_unit_price",
-        "pet_age_months",
-        "purchase_structure_binary",
-        "days_between_purchase_mean",
-        "days_to_first_purchase_from_signup"
-    ]
-
-    available_controls = [c for c in candidate_controls if c in df.columns]
-    adjusted_cols = ["HVLE_yn", "pet_species_label", *available_controls]
-    adjusted_df = df.dropna(subset=adjusted_cols).copy()
-
-    control_terms = []
-    for col in available_controls:
-        if adjusted_df[col].dtype == "object" or str(adjusted_df[col].dtype) == "category":
-            control_terms.append(f"C({col})")
-        else:
-            control_terms.append(col)
-
-    adjusted_formula = "HVLE_yn ~ C(pet_species_label, Treatment(reference='dog'))"
-    if control_terms:
-        adjusted_formula += " + " + " + ".join(control_terms)
-
-    adjusted_model = smf.logit(
-        adjusted_formula,
-        data=adjusted_df
-    ).fit(disp=False)
-
-    adjusted_or_table = logistic_result_table(adjusted_model)
-
-    print("\nAdjusted logistic regression:")
-    print("Formula:")
-    print(adjusted_formula)
-    print("\nOdds ratios:")
-    print(adjusted_or_table.round(4).to_string(index=False))
-
-    species_effect = adjusted_or_table[
-        adjusted_or_table["predictor"].str.contains("pet_species_label", regex=False)
+    species_effect = unadjusted_or_table[
+        unadjusted_or_table["predictor"].str.contains("pet_species_label", regex=False)
     ]
 
     print("\nH5 key result: pet species effect")
@@ -237,7 +175,7 @@ def test_h5_pet_species(hv_df):
         print("Chi-square result: no significant association between pet species and HVLE status.")
 
     for _, row in species_effect.iterrows():
-        print(f"\nAdjusted logistic result for {row['predictor']}:")
+        print(f"\nUnadjusted logistic result for {row['predictor']}:")
         print(
             "OR = "
             f"{row['odds_ratio']:.4f}, 95% CI = "
@@ -265,10 +203,6 @@ def test_h5_pet_species(hv_df):
         "expected_warning": expected_warning,
         "unadjusted_model": unadjusted_model,
         "unadjusted_or_table": unadjusted_or_table,
-        "adjusted_data": adjusted_df,
-        "adjusted_formula": adjusted_formula,
-        "adjusted_model": adjusted_model,
-        "adjusted_or_table": adjusted_or_table,
         "species_effect": species_effect
     }
 

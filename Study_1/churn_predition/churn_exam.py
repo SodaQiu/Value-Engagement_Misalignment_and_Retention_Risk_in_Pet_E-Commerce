@@ -24,6 +24,7 @@ from sklearn.metrics import (
     recall_score
 )
 from sklearn.model_selection import StratifiedKFold, cross_validate
+from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.tree import DecisionTreeClassifier
 
@@ -83,6 +84,17 @@ models = {
     "LR": LogisticRegression(
         max_iter=2000,
         class_weight="balanced",
+        random_state=RANDOM_STATE
+    ),
+
+    "MLP": MLPClassifier(
+        hidden_layer_sizes=(64, 32),
+        activation="relu",
+        alpha=0.001,
+        learning_rate_init=0.001,
+        max_iter=500,
+        early_stopping=True,
+        validation_fraction=0.15,
         random_state=RANDOM_STATE
     )
 }

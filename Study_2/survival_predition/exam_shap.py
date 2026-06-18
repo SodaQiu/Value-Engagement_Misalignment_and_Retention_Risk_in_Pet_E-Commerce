@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
 
@@ -100,6 +101,14 @@ numeric_features, categorical_features = split_feature_types(
 X = modeling_df[feature_cols].copy()
 y = modeling_df[target_col].copy()
 
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    stratify=y,
+    random_state=RANDOM_STATE
+)
+
 
 # ============================================================
 # 2. Train SHAP model
@@ -127,8 +136,8 @@ pipeline = Pipeline([
 ])
 
 pipeline.fit(
-    X,
-    y
+    X_train,
+    y_train
 )
 
 fitted_preprocessor = pipeline.named_steps[
@@ -145,7 +154,7 @@ fitted_model = pipeline.named_steps[
 # ============================================================
 
 X_transformed = fitted_preprocessor.transform(
-    X
+    X_test
 )
 
 if hasattr(X_transformed, "toarray"):
@@ -166,7 +175,7 @@ feature_names = [
 X_transformed_df = pd.DataFrame(
     X_transformed,
     columns=feature_names,
-    index=X.index
+    index=X_test.index
 )
 
 if len(X_transformed_df) > SHAP_SAMPLE_SIZE:
@@ -240,6 +249,8 @@ print("=" * 80)
 print("Model:", model_name)
 print("Target:", target_col)
 print("Positive class: survive_yn = 1")
+print("Training sample size:", len(X_train))
+print("Test sample size:", len(X_test))
 print("SHAP sample size:", len(X_shap))
 
 print(

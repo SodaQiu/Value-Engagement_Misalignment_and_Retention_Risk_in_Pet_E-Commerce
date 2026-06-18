@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
 from churn_feature_utils import (
@@ -66,6 +67,14 @@ data = build_churn_model_data()
 X = data["X"]
 y = data["y"]
 
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    stratify=y,
+    random_state=RANDOM_STATE
+)
+
 
 # ============================================================
 # 2. Train model
@@ -104,8 +113,8 @@ pipeline = Pipeline([
 ])
 
 pipeline.fit(
-    X,
-    y
+    X_train,
+    y_train
 )
 
 fitted_preprocessor = pipeline.named_steps[
@@ -122,7 +131,7 @@ fitted_model = pipeline.named_steps[
 # ============================================================
 
 X_transformed = fitted_preprocessor.transform(
-    X
+    X_test
 )
 
 if hasattr(X_transformed, "toarray"):
@@ -143,7 +152,7 @@ feature_names = [
 X_transformed_df = pd.DataFrame(
     X_transformed,
     columns=feature_names,
-    index=X.index
+    index=X_test.index
 )
 
 if len(X_transformed_df) > SHAP_SAMPLE_SIZE:
@@ -219,6 +228,8 @@ print("\n" + "=" * 80)
 print("=== SHAP Feature Importance ===")
 print("=" * 80)
 print("Model:", model_name)
+print("Training sample size:", len(X_train))
+print("Test sample size:", len(X_test))
 print("SHAP sample size:", len(X_shap))
 
 print(

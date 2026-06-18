@@ -38,97 +38,94 @@ def test_h4_purchase_structure(hv_df, structure_col="purchase_structure"):
     df = df.dropna(subset=required_cols).copy()
 
     # --------------------------------------------------------
-    # 1. Descriptive summary
+    # Original three-category H4 version
+    # multi_category / snacks_only / supplies_only
+    #
+    # This version is kept here for reference, but is not used as the
+    # main H4 test because snacks_only has a very small sample size.
+    # The active H4 model below combines all single-category purchases
+    # into single_category and compares them with multi_category.
     # --------------------------------------------------------
 
-    h4_summary = (
-        df
-        .groupby(structure_col)
-        .agg(
-            n=("HVLE_yn", "size"),
-            hvle_n=("HVLE_yn", "sum"),
-            hvle_rate=("HVLE_yn", "mean")
-        )
-        .reset_index()
-    )
+    # h4_summary = (
+    #     df
+    #     .groupby(structure_col)
+    #     .agg(
+    #         n=("HVLE_yn", "size"),
+    #         hvle_n=("HVLE_yn", "sum"),
+    #         hvle_rate=("HVLE_yn", "mean")
+    #     )
+    #     .reset_index()
+    # )
 
-    h4_summary["hvle_rate_percent"] = (
-        h4_summary["hvle_rate"] * 100
-    )
+    # h4_summary["hvle_rate_percent"] = (
+    #     h4_summary["hvle_rate"] * 100
+    # )
 
-    # --------------------------------------------------------
-    # 2. Chi-square test
-    # --------------------------------------------------------
+    # contingency = pd.crosstab(
+    #     df[structure_col],
+    #     df["HVLE_yn"]
+    # )
 
-    contingency = pd.crosstab(
-        df[structure_col],
-        df["HVLE_yn"]
-    )
+    # chi2, chi2_p, dof, expected = chi2_contingency(contingency)
 
-    chi2, chi2_p, dof, expected = chi2_contingency(contingency)
+    # expected_min = expected.min()
+    # expected_warning = expected_min < 5
 
-    expected_min = expected.min()
-    expected_warning = expected_min < 5
+    # formula = f"HVLE_yn ~ C({structure_col})"
 
-    # --------------------------------------------------------
-    # 3. Logistic regression
-    # --------------------------------------------------------
+    # model = smf.logit(
+    #     formula,
+    #     data=df
+    # ).fit(disp=False)
 
-    formula = f"HVLE_yn ~ C({structure_col})"
+    # params = model.params
+    # conf = model.conf_int()
 
-    model = smf.logit(
-        formula,
-        data=df
-    ).fit(disp=False)
+    # or_table = pd.DataFrame({
+    #     "predictor": params.index,
+    #     "beta": params.values,
+    #     "odds_ratio": np.exp(params.values),
+    #     "ci_lower": np.exp(conf[0].values),
+    #     "ci_upper": np.exp(conf[1].values),
+    #     "p_value": model.pvalues.values
+    # })
 
-    params = model.params
-    conf = model.conf_int()
+    # print("=" * 70)
+    # print("=== H4: Purchase Structure and HVLE Formation ===")
+    # print("=" * 70)
 
-    or_table = pd.DataFrame({
-        "predictor": params.index,
-        "beta": params.values,
-        "odds_ratio": np.exp(params.values),
-        "ci_lower": np.exp(conf[0].values),
-        "ci_upper": np.exp(conf[1].values),
-        "p_value": model.pvalues.values
-    })
+    # print("\nH4 Summary:")
+    # print(
+    #     h4_summary[
+    #         [
+    #             structure_col,
+    #             "n",
+    #             "hvle_n",
+    #             "hvle_rate_percent"
+    #         ]
+    #     ]
+    #     .round(2)
+    #     .to_string(index=False)
+    # )
 
-    # --------------------------------------------------------
-    # 4. Print results
-    # --------------------------------------------------------
+    # print("\nChi-square test:")
+    # print("Chi-square:", round(chi2, 4))
+    # print("df:", dof)
+    # print("p-value:", round(chi2_p, 6))
+    # print("Minimum expected frequency:", round(expected_min, 4))
 
-    print("=" * 70)
-    print("=== H4: Purchase Structure and HVLE Formation ===")
-    print("=" * 70)
+    # if expected_warning:
+    #     print(
+    #         "Warning: Some expected frequencies are below 5. "
+    #         "Interpret chi-square results cautiously."
+    #     )
 
-    print("\nH4 Summary:")
-    print(
-        h4_summary[
-            [
-                structure_col,
-                "n",
-                "hvle_n",
-                "hvle_rate_percent"
-            ]
-        ]
-        .round(2)
-        .to_string(index=False)
-    )
-
-    print("\nChi-square test:")
-    print("Chi-square:", round(chi2, 4))
-    print("df:", dof)
-    print("p-value:", round(chi2_p, 6))
-    print("Minimum expected frequency:", round(expected_min, 4))
-
-    if expected_warning:
-        print("Warning: Some expected frequencies are below 5. Interpret chi-square results cautiously.")
-
-    print("\nLogistic regression odds ratios:")
-    print(or_table.round(4).to_string(index=False))
+    # print("\nLogistic regression odds ratios:")
+    # print(or_table.round(4).to_string(index=False))
 
     # --------------------------------------------------------
-    # 5. Binary robustness check:
+    # Active binary H4 test:
     # multi_category vs. single_category
     # --------------------------------------------------------
 
@@ -197,8 +194,8 @@ def test_h4_purchase_structure(hv_df, structure_col="purchase_structure"):
         "p_value": binary_model.pvalues.values
     })
 
-    print("\n" + "=" * 70)
-    print("=== H4 Binary Check: Multi vs Single Category ===")
+    print("=" * 70)
+    print("=== H4: Multi vs Single Category Purchase Structure ===")
     print("=" * 70)
 
     print("\nBinary H4 Summary:")
@@ -235,16 +232,17 @@ def test_h4_purchase_structure(hv_df, structure_col="purchase_structure"):
 
     return {
         "h4_data": df,
-        "h4_summary": h4_summary,
-        "contingency_table": contingency,
-        "expected": expected,
-        "chi2": chi2,
-        "chi2_p": chi2_p,
-        "dof": dof,
-        "expected_min": expected_min,
-        "expected_warning": expected_warning,
-        "model": model,
-        "or_table": or_table,
+        # Original three-category H4 outputs are intentionally disabled.
+        # "h4_summary": h4_summary,
+        # "contingency_table": contingency,
+        # "expected": expected,
+        # "chi2": chi2,
+        # "chi2_p": chi2_p,
+        # "dof": dof,
+        # "expected_min": expected_min,
+        # "expected_warning": expected_warning,
+        # "model": model,
+        # "or_table": or_table,
         "binary_h4_data": binary_df,
         "binary_h4_summary": binary_summary,
         "binary_contingency_table": binary_contingency,
