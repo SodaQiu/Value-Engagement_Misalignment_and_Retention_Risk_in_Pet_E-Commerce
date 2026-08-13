@@ -338,22 +338,29 @@ output/study_2b_hvle_retention_shap/
 
 # Python Dependencies
 
-The analyses use the following Python packages:
+Frameworks and libraries used:
 
 ```text
-pandas
-numpy
+Python 3.12.4
+pandas 2.2.2
+numpy 1.26.4
+matplotlib 3.8.4
+seaborn 0.13.2
+scikit-learn 1.4.2
+imbalanced-learn 0.12.3
 scipy
 statsmodels
-scikit-learn
-matplotlib
 shap
-lightgbm
 ```
 
-`lightgbm` is required only for the LightGBM model.
+Models used:
 
-`shap` is required for the SHAP interpretation analysis.
+```text
+XGBoost 3.0.5
+CatBoost 1.2.8
+Decision Tree (scikit-learn 1.4.2)
+Random Forest (scikit-learn 1.4.2)
+```
 
 For reproducibility, users are encouraged to install package versions consistent with the environment reported in the repository's dependency file, when available.
 
