@@ -1,126 +1,106 @@
-# Pet E-commerce Analysis
+# Study 1: Hypothesis Tests
 
-This repository contains a customer analytics workflow for a pet e-commerce dataset. It covers data preprocessing, churn prediction, SHAP interpretation, and hypothesis tests around early engagement, customer value, pet lifecycle, purchase structure, and HVLE formation.
+This folder contains the Study 1 analyses examining fourth-purchase churn among customers who completed their first three purchases.
 
-## Project Structure
+## Data
 
-```text
-.
-├── Data preprocessing/
-│   └── data_cleaning.py
-├── Study_1/
-│   ├── Hypothesis Exam/
-│   │   ├── hypothesis_exam_H1.py
-│   │   ├── hypothesis_exam_H2.py
-│   │   └── quadrant_utils.py
-│   └── churn_predition/
-│       ├── churn_exam.py
-│       ├── churn_feature_utils.py
-│       └── shap_analysis.py
-├── Study_2/
-│   ├── Hypothesis Exam/
-│   │   ├── hypothesis_exam_H3.py
-│   │   ├── hypothesis_exam_H4.py
-│   │   └── hypothesis_exam_H5.py
-│   ├── survival_predition/
-│   │   ├── survival_exam.py
-│   │   └── exam_shap.py
-│   └── quadrant_utils.py
-├── original_data_english.csv
-├── requirements.txt
-└── README.md
-```
-
-Generated analysis files are written to `output/`, which is intentionally excluded from Git.
-
-## Environment Setup
-
-Create and activate a virtual environment:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-Install dependencies:
-
-```powershell
-pip install -r requirements.txt
-```
-
-The project was most recently run with Python 3.11/3.12 and the package versions listed in `requirements.txt`.
-
-## Data Preparation
-
-The preprocessing script expects `original_data_english.csv` in the project root.
-
-Run:
-
-```powershell
-python "Data preprocessing\data_cleaning.py"
-```
-
-This creates the cleaned analysis datasets under `output/`, including:
+All scripts use the cleaned analysis dataset:
 
 ```text
 output/pet_data_clean_all_variables.csv
-output/pet_data_with_ve_variables.csv
 ```
 
-## Study 1
-
-Study 1 focuses on fourth-purchase churn among customers who completed the first three purchases.
-
-Run hypothesis tests:
-
-```powershell
-python "Study_1\Hypothesis Exam\hypothesis_exam_H1.py"
-python "Study_1\Hypothesis Exam\hypothesis_exam_H2.py"
-```
-
-Run churn prediction models:
-
-```powershell
-python "Study_1\churn_predition\churn_exam.py"
-```
-
-Run SHAP interpretation:
-
-```powershell
-python "Study_1\churn_predition\shap_analysis.py"
-```
-
-## Study 2
-
-Study 2 focuses on high-value customers and HVLE formation. In this project:
+The shared data-loading and sample-construction functions are implemented in:
 
 ```text
-HVLE = high value, low engagement
-HVHE = high value, high engagement
+quadrant_utils.py
 ```
 
-Run hypothesis tests:
+The Study 1 analysis sample includes customers with non-missing and usable values for:
+
+* `order_unit_price`
+* `review_written_yn`
+* `push_notification_consent_yn`
+* `churn_yn`
+
+The dependent variable is defined as:
+
+```text
+churn_yn = 1 if the customer did not complete a fourth purchase
+churn_yn = 0 if the customer completed a fourth purchase
+```
+
+Early observable engagement is measured as:
+
+```text
+engagement_count = review_written_yn + push_notification_consent_yn
+
+high_engagement = 1 if engagement_count >= 1
+high_engagement = 0 if engagement_count = 0
+```
+
+High-value customers are identified using the median `order_unit_price` within the Study 1 analysis sample.
+
+The original transaction-level dataset is not included in this repository because it was provided by a commercial e-commerce platform and is subject to confidentiality restrictions.
+
+## Files
+
+### `hypothesis_exam_H1.py`
+
+Tests whether a greater number of early observable engagement signals is associated with lower fourth-purchase churn.
+
+Main models:
+
+```text
+churn_yn ~ engagement_count
+churn_yn ~ engagement_count + log_order_unit_price
+```
+
+The script reports the estimated coefficients, odds ratios, confidence intervals, statistical significance, and relevant model-comparison statistics.
+
+### `hypothesis_exam_H2.py`
+
+Tests whether, among high-value customers, low-engagement customers (`HVLE`) have higher fourth-purchase churn than high-engagement customers (`HVHE`).
+
+Main models:
+
+```text
+churn_yn ~ HVLE_yn
+churn_yn ~ HVLE_yn + log_order_unit_price
+```
+
+The script also reports descriptive comparisons between the HVLE and HVHE groups.
+
+### `misalignment_supplemental_test.py`
+
+Provides a supplemental test of the interaction between transaction value and observable engagement.
+
+Main model:
+
+```text
+churn_yn ~ log_order_unit_price * high_engagement
+```
+
+The script reports:
+
+* the interaction coefficient and odds ratio
+* a likelihood-ratio test comparing the interaction model with the corresponding main-effects model
+* observed and model-adjusted fourth-purchase completion probabilities for the `HVHE`, `HVLE`, `LVHE`, and `LVLE` groups
+
+Because the regression model predicts churn, the corresponding fourth-purchase completion probability is calculated as:
+
+```text
+1 - predicted churn probability
+```
+
+## Run
+
+Run the scripts from the project root directory:
 
 ```powershell
-python "Study_2\Hypothesis Exam\hypothesis_exam_H3.py"
-python "Study_2\Hypothesis Exam\hypothesis_exam_H4.py"
-python "Study_2\Hypothesis Exam\hypothesis_exam_H5.py"
+.\.venv\Scripts\python.exe "Study_1\Hypothesis Exam\hypothesis_exam_H1.py"
+.\.venv\Scripts\python.exe "Study_1\Hypothesis Exam\hypothesis_exam_H2.py"
+.\.venv\Scripts\python.exe "Study_1\Hypothesis Exam\misalignment_supplemental_test.py"
 ```
 
-Run HVLE survival prediction:
-
-```powershell
-python "Study_2\survival_predition\survival_exam.py"
-```
-
-Run SHAP interpretation for the Study 2 survival model:
-
-```powershell
-python "Study_2\survival_predition\exam_shap.py"
-```
-
-## Notes
-
-- Paths contain spaces, so keep quotation marks around script paths in terminal commands.
-- `output/` and `.venv/` are ignored by Git.
-- Some scripts use optional model libraries such as LightGBM and SHAP. They are included in `requirements.txt`.
+Python package requirements and environment information are provided in the project-level `requirements.txt` and README files.

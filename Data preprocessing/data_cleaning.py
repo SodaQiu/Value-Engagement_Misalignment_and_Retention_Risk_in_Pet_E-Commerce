@@ -286,20 +286,17 @@ converted_date_cols = []
 
 for col in date_cols:
     parsed = parse_datetime_series(df[col])
+    valid_mask = parsed.notna()
 
-    # 至少一半非缺失数据可以识别为日期，才进行转换
-    if parsed.notna().mean() > 0.5:
-        valid_mask = parsed.notna()
+    # 先创建全部为 -1 的列，避免 NaT 被转换为极端负数
+    timestamp_values = pd.Series(-1, index=df.index, dtype="int64")
 
-        # 先创建全部为 -1 的列，避免 NaT 被转换为极端负数
-        timestamp_values = pd.Series(-1, index=df.index, dtype="int64")
+    timestamp_values.loc[valid_mask] = (
+        parsed.loc[valid_mask].astype("int64") // 10**9
+    )
 
-        timestamp_values.loc[valid_mask] = (
-            parsed.loc[valid_mask].astype("int64") // 10**9
-        )
-
-        df[col] = timestamp_values
-        converted_date_cols.append(col)
+    df[col] = timestamp_values
+    converted_date_cols.append(col)
 
 print("\n转换为 Unix timestamp 的日期变量:")
 print(converted_date_cols)

@@ -1,788 +1,283 @@
 # ============================================================
-# H2 TEST
-# Incremental value of observable early engagement signals
+# H2: HVLE versus HVHE fourth-purchase churn
 #
 # Hypothesis:
-# Compared with a value-only model, a model incorporating
-# both early transaction value and observable early engagement
-# signals provides better identification of fourth-purchase
-# churn.
+# Among high-value customers, low-engagement customers (HVLE)
+# have a higher fourth-purchase churn rate than high-engagement
+# customers (HVHE).
 #
 # DV:
-# churn_yn = 1 if the user did not complete a fourth purchase
+# churn_yn = 1 if the customer did not complete purchase 4
 # churn_yn = 0 otherwise
 #
-# Model 1:
-# churn_yn ~ log_order_unit_price
-#
-# Model 2:
-# churn_yn ~ log_order_unit_price + engagement_count
+# Reference group:
+# HVHE (high value, high engagement)
 # ============================================================
-
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from scipy.stats import chi2
-from sklearn.metrics import (
-    brier_score_loss,
-    log_loss,
-    roc_auc_score
-)
-from sklearn.model_selection import StratifiedKFold
+from scipy.stats import chi2_contingency
 
 from quadrant_utils import load_hypothesis_data
 
 
-# ------------------------------------------------------------
-# 0. Settings
-# ------------------------------------------------------------
+def logistic_result(model, predictor):
+    """Return the key logistic-regression statistics."""
+    coefficient = model.params[predictor]
+    ci_low, ci_high = model.conf_int().loc[predictor]
 
-N_SPLITS = 5
-RANDOM_STATE = 42
-N_BOOTSTRAP = 2000
+    return {
+        "coefficient": coefficient,
+        "odds_ratio": np.exp(coefficient),
+        "ci_low": np.exp(ci_low),
+        "ci_high": np.exp(ci_high),
+        "p_value": model.pvalues[predictor]
+    }
 
-
-# ------------------------------------------------------------
-# 1. Load shared analysis dataset
-# ------------------------------------------------------------
 
 data = load_hypothesis_data()
+analysis_df = data["analysis_df"].copy()
 
-h2_df = data["analysis_df"].copy()
-file_path = Path(data["file_path"])
-output_dir = file_path.parent
+required_columns = [
+    "high_value",
+    "high_engagement",
+    "churn_yn",
+    "order_unit_price"
+]
+missing_columns = [
+    column
+    for column in required_columns
+    if column not in analysis_df.columns
+]
 
+if missing_columns:
+    raise ValueError(
+        f"H2 required columns are missing: {missing_columns}"
+    )
+
+for column in ["high_value", "high_engagement", "churn_yn"]:
+    missing_count = analysis_df[column].isna().sum()
+    invalid_values = sorted(
+        analysis_df.loc[
+            analysis_df[column].notna()
+            & ~analysis_df[column].isin([0, 1]),
+            column
+        ].unique().tolist()
+    )
+
+    if missing_count or invalid_values:
+        raise ValueError(
+            f"{column} must contain only 0/1 with no missing values; "
+            f"missing={missing_count}, invalid={invalid_values}"
+        )
+
+invalid_value_mask = (
+    analysis_df["order_unit_price"].isna()
+    | ~np.isfinite(analysis_df["order_unit_price"])
+    | (analysis_df["order_unit_price"] <= 0)
+)
+
+if invalid_value_mask.any():
+    raise ValueError(
+        "order_unit_price must be finite, positive, and non-missing; "
+        f"invalid rows={int(invalid_value_mask.sum())}"
+    )
+
+# H2 focuses on customers classified as high value.
+h2_df = analysis_df[
+    analysis_df["high_value"] == 1
+].copy()
+
+if h2_df.empty:
+    raise ValueError(
+        "H2 high-value sample is empty. Check the value threshold."
+    )
+
+# HVLE = 1 and HVHE = 0. A positive coefficient therefore indicates
+# higher churn among HVLE customers relative to HVHE customers.
+h2_df["HVLE_yn"] = (
+    h2_df["high_engagement"] == 0
+).astype(int)
+h2_df["group"] = h2_df["HVLE_yn"].map({
+    0: "HVHE",
+    1: "HVLE"
+})
 h2_df["log_order_unit_price"] = np.log1p(
     h2_df["order_unit_price"]
 )
 
-required_h2_cols = [
-    "churn_yn",
-    "order_unit_price",
-    "log_order_unit_price",
-    "engagement_count"
-]
-
-h2_df = (
-    h2_df[required_h2_cols]
-    .dropna()
-    .copy()
-)
-
-if h2_df.empty:
+if set(h2_df["HVLE_yn"].unique()) != {0, 1}:
     raise ValueError(
-        "H2 analysis sample is empty. Check the input data."
+        "The H2 sample must contain both HVHE (0) and HVLE (1)."
     )
 
-if h2_df["churn_yn"].nunique() != 2:
+if set(h2_df["churn_yn"].unique()) != {0, 1}:
     raise ValueError(
-        "churn_yn must contain both 0 and 1 for logistic regression."
-    )
-
-print("=" * 80)
-print("H2 DATASET LOADED")
-print("=" * 80)
-print("Data file:", file_path)
-print("Analysis sample size:", len(h2_df))
-print(
-    "Fourth-purchase churn rate:",
-    f"{h2_df['churn_yn'].mean() * 100:.2f}%"
-)
-print(
-    "Median order_unit_price:",
-    h2_df["order_unit_price"].median()
-)
-
-
-# ------------------------------------------------------------
-# 2. Fit nested logistic regression models
-#
-# Model 1:
-# Value-only model
-#
-# Model 2:
-# Value + engagement model
-# ------------------------------------------------------------
-
-value_only_model = smf.logit(
-    formula="churn_yn ~ log_order_unit_price",
-    data=h2_df
-).fit(disp=False)
-
-value_engagement_model = smf.logit(
-    formula=(
-        "churn_yn ~ log_order_unit_price "
-        "+ engagement_count"
-    ),
-    data=h2_df
-).fit(disp=False)
-
-
-# ------------------------------------------------------------
-# 3. Likelihood-ratio test
-#
-# H0:
-# Adding engagement_count does not improve model fit.
-#
-# H1:
-# Adding engagement_count improves model fit.
-# ------------------------------------------------------------
-
-lr_stat = 2 * (
-    value_engagement_model.llf
-    - value_only_model.llf
-)
-
-lr_df = int(
-    value_engagement_model.df_model
-    - value_only_model.df_model
-)
-
-lr_p_value = chi2.sf(
-    lr_stat,
-    lr_df
-)
-
-
-# ------------------------------------------------------------
-# 4. Calculate McFadden pseudo-R-squared
-# ------------------------------------------------------------
-
-value_only_pseudo_r2 = (
-    1
-    - value_only_model.llf
-    / value_only_model.llnull
-)
-
-value_engagement_pseudo_r2 = (
-    1
-    - value_engagement_model.llf
-    / value_engagement_model.llnull
-)
-
-
-# ------------------------------------------------------------
-# 5. In-sample model comparison table
-# ------------------------------------------------------------
-
-fit_comparison = pd.DataFrame([
-    {
-        "model": "Model 1: Value only",
-        "predictors": "log_order_unit_price",
-        "log_likelihood": value_only_model.llf,
-        "aic": value_only_model.aic,
-        "bic": value_only_model.bic,
-        "mcfadden_pseudo_r2": value_only_pseudo_r2
-    },
-    {
-        "model": "Model 2: Value + engagement",
-        "predictors": (
-            "log_order_unit_price + engagement_count"
-        ),
-        "log_likelihood": value_engagement_model.llf,
-        "aic": value_engagement_model.aic,
-        "bic": value_engagement_model.bic,
-        "mcfadden_pseudo_r2": value_engagement_pseudo_r2
-    }
-])
-
-print("\n" + "=" * 80)
-print("H2 IN-SAMPLE MODEL COMPARISON")
-print("=" * 80)
-
-print(
-    fit_comparison.to_string(
-        index=False,
-        float_format=lambda x: f"{x:.6f}"
-    )
-)
-
-print("\n" + "=" * 80)
-print("H2 LIKELIHOOD-RATIO TEST")
-print("=" * 80)
-print(f"LR chi-square statistic: {lr_stat:.4f}")
-print(f"Degrees of freedom: {lr_df}")
-print(f"P-value: {lr_p_value:.6g}")
-
-if lr_p_value < 0.05:
-    print(
-        "Conclusion: Adding engagement_count significantly "
-        "improves model fit."
-    )
-else:
-    print(
-        "Conclusion: Adding engagement_count does not "
-        "significantly improve model fit."
+        "The H2 sample must contain both retained (0) and churned (1) "
+        "customers."
     )
 
 
 # ------------------------------------------------------------
-# 6. Report the incremental engagement coefficient
+# 1. Descriptive comparison
 # ------------------------------------------------------------
 
-engagement_coef = (
-    value_engagement_model
-    .params["engagement_count"]
+group_summary = (
+    h2_df
+    .groupby("group", observed=True)
+    .agg(
+        n=("churn_yn", "size"),
+        churn_n=("churn_yn", "sum"),
+        churn_rate=("churn_yn", "mean")
+    )
+    .reindex(["HVHE", "HVLE"])
+    .reset_index()
 )
 
-engagement_p_value = (
-    value_engagement_model
-    .pvalues["engagement_count"]
+group_summary["churn_rate_percent"] = (
+    group_summary["churn_rate"] * 100
+)
+group_summary["retention_rate_percent"] = (
+    (1 - group_summary["churn_rate"]) * 100
 )
 
-engagement_ci_low, engagement_ci_high = (
-    value_engagement_model
-    .conf_int()
-    .loc["engagement_count"]
-)
+group_churn_rates = group_summary.set_index("group")["churn_rate"]
+churn_rate_difference_pp = (
+    group_churn_rates["HVLE"] - group_churn_rates["HVHE"]
+) * 100
 
-engagement_or = np.exp(
-    engagement_coef
-)
-
-engagement_or_ci_low = np.exp(
-    engagement_ci_low
-)
-
-engagement_or_ci_high = np.exp(
-    engagement_ci_high
-)
-
-print("\n" + "=" * 80)
-print("ENGAGEMENT COUNT IN MODEL 2")
 print("=" * 80)
-print(f"Coefficient: {engagement_coef:.4f}")
-print(f"Odds Ratio: {engagement_or:.4f}")
+print("H2: HVLE VERSUS HVHE FOURTH-PURCHASE CHURN")
+print("=" * 80)
+print("High-value analysis sample:", len(h2_df))
+print("Value threshold: median order_unit_price")
+print("Reference group: HVHE")
+
+print("\nGROUP SUMMARY")
 print(
-    "95% CI for OR: "
-    f"[{engagement_or_ci_low:.4f}, "
-    f"{engagement_or_ci_high:.4f}]"
-)
-print(f"P-value: {engagement_p_value:.6g}")
-
-
-# ------------------------------------------------------------
-# 7. Stratified five-fold cross-validation
-#
-# Use out-of-fold predictions:
-# Each user receives a predicted probability from a model
-# that was not trained using that user's row.
-# ------------------------------------------------------------
-
-y = h2_df["churn_yn"].astype(int).to_numpy()
-
-x_value_only = (
-    h2_df[
-        ["log_order_unit_price"]
-    ]
-    .astype(float)
-)
-
-x_value_engagement = (
-    h2_df[
+    group_summary[
         [
-            "log_order_unit_price",
-            "engagement_count"
+            "group",
+            "n",
+            "churn_n",
+            "churn_rate_percent",
+            "retention_rate_percent"
         ]
     ]
-    .astype(float)
+    .round(2)
+    .to_string(index=False)
 )
-
-cv = StratifiedKFold(
-    n_splits=N_SPLITS,
-    shuffle=True,
-    random_state=RANDOM_STATE
+print(
+    "HVLE minus HVHE churn-rate difference: "
+    f"{churn_rate_difference_pp:.2f} percentage points"
 )
-
-oof_pred_value_only = np.full(
-    len(h2_df),
-    np.nan
-)
-
-oof_pred_value_engagement = np.full(
-    len(h2_df),
-    np.nan
-)
-
-fold_results = []
-
-for fold, (train_idx, test_idx) in enumerate(
-    cv.split(x_value_only, y),
-    start=1
-):
-    y_train = y[train_idx]
-    y_test = y[test_idx]
-
-    # Model 1: Value only
-    x_train_value_only = sm.add_constant(
-        x_value_only.iloc[train_idx],
-        has_constant="add"
-    )
-
-    x_test_value_only = sm.add_constant(
-        x_value_only.iloc[test_idx],
-        has_constant="add"
-    )
-
-    cv_value_only_model = sm.Logit(
-        y_train,
-        x_train_value_only
-    ).fit(disp=False)
-
-    pred_value_only = cv_value_only_model.predict(
-        x_test_value_only
-    )
-
-    # Model 2: Value + engagement
-    x_train_value_engagement = sm.add_constant(
-        x_value_engagement.iloc[train_idx],
-        has_constant="add"
-    )
-
-    x_test_value_engagement = sm.add_constant(
-        x_value_engagement.iloc[test_idx],
-        has_constant="add"
-    )
-
-    cv_value_engagement_model = sm.Logit(
-        y_train,
-        x_train_value_engagement
-    ).fit(disp=False)
-
-    pred_value_engagement = (
-        cv_value_engagement_model.predict(
-            x_test_value_engagement
-        )
-    )
-
-    oof_pred_value_only[test_idx] = (
-        pred_value_only
-    )
-
-    oof_pred_value_engagement[test_idx] = (
-        pred_value_engagement
-    )
-
-    # Numerical safety for log loss
-    pred_value_only_clipped = np.clip(
-        pred_value_only,
-        1e-15,
-        1 - 1e-15
-    )
-
-    pred_value_engagement_clipped = np.clip(
-        pred_value_engagement,
-        1e-15,
-        1 - 1e-15
-    )
-
-    fold_results.append(
-        {
-            "fold": fold,
-            "value_only_auc": roc_auc_score(
-                y_test,
-                pred_value_only
-            ),
-            "value_engagement_auc": roc_auc_score(
-                y_test,
-                pred_value_engagement
-            ),
-            "auc_improvement": (
-                roc_auc_score(
-                    y_test,
-                    pred_value_engagement
-                )
-                - roc_auc_score(
-                    y_test,
-                    pred_value_only
-                )
-            ),
-            "value_only_brier": brier_score_loss(
-                y_test,
-                pred_value_only
-            ),
-            "value_engagement_brier": brier_score_loss(
-                y_test,
-                pred_value_engagement
-            ),
-            "brier_improvement": (
-                brier_score_loss(
-                    y_test,
-                    pred_value_only
-                )
-                - brier_score_loss(
-                    y_test,
-                    pred_value_engagement
-                )
-            ),
-            "value_only_log_loss": log_loss(
-                y_test,
-                pred_value_only_clipped
-            ),
-            "value_engagement_log_loss": log_loss(
-                y_test,
-                pred_value_engagement_clipped
-            ),
-            "log_loss_improvement": (
-                log_loss(
-                    y_test,
-                    pred_value_only_clipped
-                )
-                - log_loss(
-                    y_test,
-                    pred_value_engagement_clipped
-                )
-            )
-        }
-    )
-
-fold_results_df = pd.DataFrame(
-    fold_results
-)
-
-if (
-    np.isnan(oof_pred_value_only).any()
-    or np.isnan(oof_pred_value_engagement).any()
-):
-    raise ValueError(
-        "交叉验证预测结果存在缺失值，请检查代码。"
-    )
 
 
 # ------------------------------------------------------------
-# 8. Overall out-of-fold performance
+# 2. Chi-square test
 # ------------------------------------------------------------
 
-oof_value_only_auc = roc_auc_score(
-    y,
-    oof_pred_value_only
+contingency_table = (
+    pd.crosstab(h2_df["group"], h2_df["churn_yn"])
+    .reindex(index=["HVHE", "HVLE"], columns=[0, 1])
 )
 
-oof_value_engagement_auc = roc_auc_score(
-    y,
-    oof_pred_value_engagement
+chi_square, chi_square_p, chi_square_df, expected = (
+    # Use the uncorrected Pearson chi-square consistently across H2-H5.
+    # Logistic regression is the primary inferential test.
+    chi2_contingency(contingency_table, correction=False)
 )
 
-oof_auc_improvement = (
-    oof_value_engagement_auc
-    - oof_value_only_auc
+print("\nCHI-SQUARE TEST")
+print(contingency_table.to_string())
+print(f"Chi-square: {chi_square:.4f}")
+print(f"Degrees of freedom: {chi_square_df}")
+print(f"P-value: {chi_square_p:.6g}")
+print(f"Minimum expected frequency: {expected.min():.4f}")
+
+
+# ------------------------------------------------------------
+# 3. Logistic regression models
+# ------------------------------------------------------------
+
+unadjusted_model = smf.logit(
+    "churn_yn ~ HVLE_yn",
+    data=h2_df
+).fit(disp=False)
+
+value_adjusted_model = smf.logit(
+    "churn_yn ~ HVLE_yn + log_order_unit_price",
+    data=h2_df
+).fit(disp=False)
+
+unadjusted_result = logistic_result(
+    unadjusted_model,
+    "HVLE_yn"
+)
+adjusted_result = logistic_result(
+    value_adjusted_model,
+    "HVLE_yn"
 )
 
-oof_value_only_brier = brier_score_loss(
-    y,
-    oof_pred_value_only
-)
-
-oof_value_engagement_brier = brier_score_loss(
-    y,
-    oof_pred_value_engagement
-)
-
-oof_brier_improvement = (
-    oof_value_only_brier
-    - oof_value_engagement_brier
-)
-
-oof_value_only_log_loss = log_loss(
-    y,
-    np.clip(
-        oof_pred_value_only,
-        1e-15,
-        1 - 1e-15
-    )
-)
-
-oof_value_engagement_log_loss = log_loss(
-    y,
-    np.clip(
-        oof_pred_value_engagement,
-        1e-15,
-        1 - 1e-15
-    )
-)
-
-oof_log_loss_improvement = (
-    oof_value_only_log_loss
-    - oof_value_engagement_log_loss
-)
-
-oof_performance = pd.DataFrame([
+model_results = pd.DataFrame([
     {
-        "model": "Model 1: Value only",
-        "roc_auc": oof_value_only_auc,
-        "brier_score": oof_value_only_brier,
-        "log_loss": oof_value_only_log_loss
+        "model": "Model 1: Unadjusted",
+        **unadjusted_result
     },
     {
-        "model": "Model 2: Value + engagement",
-        "roc_auc": oof_value_engagement_auc,
-        "brier_score": oof_value_engagement_brier,
-        "log_loss": oof_value_engagement_log_loss
+        "model": "Model 2: Value adjusted",
+        **adjusted_result
     }
 ])
 
-print("\n" + "=" * 80)
-print("H2 FIVE-FOLD CROSS-VALIDATION RESULTS")
-print("=" * 80)
-
+print("\nLOGISTIC REGRESSION RESULTS: HVLE VERSUS HVHE")
 print(
-    fold_results_df.to_string(
+    model_results[
+        [
+            "model",
+            "coefficient",
+            "odds_ratio",
+            "ci_low",
+            "ci_high",
+            "p_value"
+        ]
+    ]
+    .to_string(
         index=False,
-        float_format=lambda x: f"{x:.6f}"
-    )
-)
-
-print("\n" + "=" * 80)
-print("H2 OUT-OF-FOLD PERFORMANCE")
-print("=" * 80)
-
-print(
-    oof_performance.to_string(
-        index=False,
-        float_format=lambda x: f"{x:.6f}"
-    )
-)
-
-print("\n" + "=" * 80)
-print("H2 OUT-OF-FOLD IMPROVEMENT")
-print("=" * 80)
-print(
-    "ROC-AUC improvement: "
-    f"{oof_auc_improvement:.6f}"
-)
-print(
-    "Brier Score improvement: "
-    f"{oof_brier_improvement:.6f}"
-)
-print(
-    "Log Loss improvement: "
-    f"{oof_log_loss_improvement:.6f}"
-)
-
-
-# ------------------------------------------------------------
-# 9. Paired bootstrap confidence intervals
-#
-# Positive improvement values mean:
-# - higher ROC-AUC
-# - lower Brier Score
-# - lower Log Loss
-#
-# for Model 2 compared with Model 1.
-# ------------------------------------------------------------
-
-rng = np.random.default_rng(
-    RANDOM_STATE
-)
-
-auc_improvements = []
-brier_improvements = []
-log_loss_improvements = []
-
-n = len(y)
-
-for _ in range(N_BOOTSTRAP):
-    sample_idx = rng.integers(
-        0,
-        n,
-        size=n
-    )
-
-    y_boot = y[sample_idx]
-
-    # ROC-AUC requires both classes
-    if np.unique(y_boot).size < 2:
-        continue
-
-    pred_value_only_boot = (
-        oof_pred_value_only[sample_idx]
-    )
-
-    pred_value_engagement_boot = (
-        oof_pred_value_engagement[sample_idx]
-    )
-
-    auc_improvements.append(
-        roc_auc_score(
-            y_boot,
-            pred_value_engagement_boot
-        )
-        - roc_auc_score(
-            y_boot,
-            pred_value_only_boot
-        )
-    )
-
-    brier_improvements.append(
-        brier_score_loss(
-            y_boot,
-            pred_value_only_boot
-        )
-        - brier_score_loss(
-            y_boot,
-            pred_value_engagement_boot
-        )
-    )
-
-    log_loss_improvements.append(
-        log_loss(
-            y_boot,
-            np.clip(
-                pred_value_only_boot,
-                1e-15,
-                1 - 1e-15
-            )
-        )
-        - log_loss(
-            y_boot,
-            np.clip(
-                pred_value_engagement_boot,
-                1e-15,
-                1 - 1e-15
-            )
-        )
-    )
-
-auc_improvements = np.array(
-    auc_improvements
-)
-
-brier_improvements = np.array(
-    brier_improvements
-)
-
-log_loss_improvements = np.array(
-    log_loss_improvements
-)
-
-
-def summarize_bootstrap(
-    metric_name,
-    values
-):
-    observed = {
-        "roc_auc_improvement": oof_auc_improvement,
-        "brier_score_improvement": oof_brier_improvement,
-        "log_loss_improvement": oof_log_loss_improvement
-    }[metric_name]
-
-    ci_low, ci_high = np.quantile(
-        values,
-        [0.025, 0.975]
-    )
-
-    one_sided_p_value = (
-        1
-        + np.sum(values <= 0)
-    ) / (
-        len(values)
-        + 1
-    )
-
-    return {
-        "metric": metric_name,
-        "observed_improvement": observed,
-        "bootstrap_ci_low": ci_low,
-        "bootstrap_ci_high": ci_high,
-        "one_sided_p_value": one_sided_p_value
-    }
-
-
-bootstrap_summary = pd.DataFrame([
-    summarize_bootstrap(
-        "roc_auc_improvement",
-        auc_improvements
-    ),
-    summarize_bootstrap(
-        "brier_score_improvement",
-        brier_improvements
-    ),
-    summarize_bootstrap(
-        "log_loss_improvement",
-        log_loss_improvements
-    )
-])
-
-print("\n" + "=" * 80)
-print("H2 PAIRED BOOTSTRAP RESULTS")
-print("=" * 80)
-
-print(
-    bootstrap_summary.to_string(
-        index=False,
-        float_format=lambda x: f"{x:.6f}"
+        formatters={
+            "coefficient": lambda x: f"{x:.4f}",
+            "odds_ratio": lambda x: f"{x:.4f}",
+            "ci_low": lambda x: f"{x:.4f}",
+            "ci_high": lambda x: f"{x:.4f}",
+            "p_value": lambda x: f"{x:.6g}"
+        }
     )
 )
 
 
 # ------------------------------------------------------------
-# 10. Final hypothesis decision
-#
-# Primary inferential criterion:
-# LR test p < .05
-#
-# Primary predictive criterion:
-# ROC-AUC improvement > 0
-# and bootstrap lower CI > 0
-#
-# Brier Score and Log Loss are supplementary metrics.
+# 4. H2 decision
 # ------------------------------------------------------------
 
-explanatory_improvement_supported = (
-    lr_p_value < 0.05
+h2_supported = (
+    unadjusted_result["coefficient"] > 0
+    and unadjusted_result["p_value"] < 0.05
+    and adjusted_result["coefficient"] > 0
+    and adjusted_result["p_value"] < 0.05
 )
 
-auc_bootstrap_low = bootstrap_summary.loc[
-    bootstrap_summary["metric"]
-    == "roc_auc_improvement",
-    "bootstrap_ci_low"
-].iloc[0]
-
-predictive_improvement_supported = (
-    oof_auc_improvement > 0
-    and auc_bootstrap_low > 0
-)
-
-print("\n" + "=" * 80)
-print("H2 FINAL DECISION")
-print("=" * 80)
-
-if explanatory_improvement_supported:
+print("\nH2 FINAL DECISION")
+if h2_supported:
     print(
-        "Explanatory evidence: Supported. "
-        "Adding engagement_count significantly improves "
-        "model fit."
+        "H2 is supported. Among high-value customers, HVLE "
+        "customers have significantly higher fourth-purchase "
+        "churn than HVHE customers, including after adjustment "
+        "for early transaction value."
     )
 else:
     print(
-        "Explanatory evidence: Not supported."
-    )
-
-if predictive_improvement_supported:
-    print(
-        "Predictive evidence: Supported. "
-        "Adding engagement_count significantly improves "
-        "out-of-fold ROC-AUC."
-    )
-else:
-    print(
-        "Predictive evidence: The ROC-AUC improvement is "
-        "not sufficiently stable under paired bootstrap."
-    )
-
-if (
-    explanatory_improvement_supported
-    and predictive_improvement_supported
-):
-    print(
-        "Overall conclusion: H2 is supported."
-    )
-else:
-    print(
-        "Overall conclusion: H2 is only partially supported "
-        "or not supported. Review the detailed metrics."
+        "H2 is not fully supported. Review the unadjusted and "
+        "value-adjusted estimates."
     )

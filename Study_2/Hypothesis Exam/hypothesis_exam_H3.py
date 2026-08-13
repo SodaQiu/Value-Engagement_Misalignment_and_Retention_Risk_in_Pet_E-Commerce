@@ -1,6 +1,6 @@
-import pandas as pd
 import numpy as np
-from scipy.stats import chi2_contingency
+import pandas as pd
+from scipy.stats import chi2_contingency, fisher_exact
 import statsmodels.formula.api as smf
 import sys
 from pathlib import Path
@@ -14,75 +14,51 @@ if str(STUDY_2_DIR) not in sys.path:
 from quadrant_utils import load_hvle_data
 
 
-def pet_age_to_group(series):
-    age_months = pd.to_numeric(
-        series,
-        errors="coerce"
-    )
-
-    age_months = age_months.where(
-        age_months >= 0,
-        np.nan
-    )
-
-    age_group = pd.cut(
-        age_months,
-        bins=[0, 6, 24, 84, np.inf],
-        labels=[
-            "baby_0_5m",
-            "young_6_23m",
-            "adult_2_6y",
-            "senior_7y_plus"
-        ],
-        right=False
-    )
-
-    return (
-        age_group
-        .astype("string")
-        .fillna("unknown")
-    )
-
-
-def test_h3_pet_age_group(hv_df):
+def test_h3_purchase_structure(hv_df, structure_col="purchase_structure"):
     """
     H3:
-    Among high-value customers, the likelihood of being classified as HVLE
-    rather than HVHE varies significantly across pet age groups.
+    在高价值客户中，购买结构会显著影响用户是否表现为低参与状态。
 
     DV:
     HVLE_yn = 1 means HVLE
     HVLE_yn = 0 means HVHE
+
+    IV:
+    purchase structure based on the first three purchases
     """
 
     df = hv_df.copy()
 
-    # --------------------------------------------------------
-    # 1. Check required columns
-    # --------------------------------------------------------
-
-    required_cols = [
-        "HVLE_yn",
-        "pet_age_months"
-    ]
-
+    required_cols = ["HVLE_yn", structure_col]
     missing = [c for c in required_cols if c not in df.columns]
 
     if missing:
         raise ValueError(f"Missing columns: {missing}")
 
     df = df.dropna(subset=required_cols).copy()
-    df["pet_age_group"] = pet_age_to_group(
-        df["pet_age_months"]
+
+
+    binary_df = df[
+        df[structure_col].isin(
+            [
+                "multi_category",
+                "snacks_only",
+                "supplies_only",
+                "feed_only",
+                "essentials_only"
+            ]
+        )
+    ].copy()
+
+    binary_df["purchase_structure_binary"] = np.where(
+        binary_df[structure_col] == "multi_category",
+        "multi_category",
+        "single_category"
     )
 
-    # --------------------------------------------------------
-    # 2. Descriptive summary
-    # --------------------------------------------------------
-
-    h3_summary = (
-        df
-        .groupby("pet_age_group")
+    binary_summary = (
+        binary_df
+        .groupby("purchase_structure_binary")
         .agg(
             n=("HVLE_yn", "size"),
             hvle_n=("HVLE_yn", "sum"),
@@ -91,54 +67,67 @@ def test_h3_pet_age_group(hv_df):
         .reset_index()
     )
 
-    h3_summary["hvle_rate_percent"] = (
-        h3_summary["hvle_rate"] * 100
+    binary_summary["hvle_rate_percent"] = (
+        binary_summary["hvle_rate"] * 100
     )
 
-    # --------------------------------------------------------
-    # 3. Chi-square test
-    # --------------------------------------------------------
-
-    contingency = pd.crosstab(
-        df["pet_age_group"],
-        df["HVLE_yn"]
+    binary_contingency = pd.crosstab(
+        binary_df["purchase_structure_binary"],
+        binary_df["HVLE_yn"]
+    ).reindex(
+        index=["multi_category", "single_category"],
+        columns=[0, 1],
+        fill_value=0
     )
 
-    chi2, chi2_p, dof, expected = chi2_contingency(contingency)
+    (
+        binary_chi2,
+        binary_chi2_p,
+        binary_dof,
+        binary_expected
+    ) = chi2_contingency(
+        binary_contingency,
+        correction=False  # Uncorrected Pearson chi-square for H2-H5.
+    )
 
-    # --------------------------------------------------------
-    # 4. Logistic regression
-    # --------------------------------------------------------
+    binary_expected_min = binary_expected.min()
+    binary_expected_warning = binary_expected_min < 5
 
-    model = smf.logit(
-        "HVLE_yn ~ C(pet_age_group)",
-        data=df
+    # Exact two-sided robustness test for the imbalanced 2x2 table.
+    # With rows ordered as multi then single and columns as non-HVLE then
+    # HVLE, an odds ratio above 1 means higher HVLE odds for single-category
+    # customers relative to multi-category customers.
+    fisher_odds_ratio, fisher_p_value = fisher_exact(
+        binary_contingency.to_numpy(),
+        alternative="two-sided"
+    )
+
+    binary_model = smf.logit(
+        "HVLE_yn ~ C(purchase_structure_binary)",
+        data=binary_df
     ).fit(disp=False)
 
-    params = model.params
-    conf = model.conf_int()
+    binary_params = binary_model.params
+    binary_conf = binary_model.conf_int()
 
-    or_table = pd.DataFrame({
-        "beta": params,
-        "odds_ratio": np.exp(params),
-        "ci_lower": np.exp(conf[0]),
-        "ci_upper": np.exp(conf[1]),
-        "p_value": model.pvalues
-    }).reset_index().rename(columns={"index": "predictor"})
-
-    # --------------------------------------------------------
-    # 5. Print results
-    # --------------------------------------------------------
+    binary_or_table = pd.DataFrame({
+        "predictor": binary_params.index,
+        "beta": binary_params.values,
+        "odds_ratio": np.exp(binary_params.values),
+        "ci_lower": np.exp(binary_conf[0].values),
+        "ci_upper": np.exp(binary_conf[1].values),
+        "p_value": binary_model.pvalues.values
+    })
 
     print("=" * 70)
-    print("=== H3: Pet Age Group and HVLE Formation ===")
+    print("=== H3: Multi vs Single Category Purchase Structure ===")
     print("=" * 70)
 
-    print("\nH3 Summary:")
+    print("\nBinary H3 Summary:")
     print(
-        h3_summary[
+        binary_summary[
             [
-                "pet_age_group",
+                "purchase_structure_binary",
                 "n",
                 "hvle_n",
                 "hvle_rate_percent"
@@ -148,35 +137,57 @@ def test_h3_pet_age_group(hv_df):
         .to_string(index=False)
     )
 
-    print("\nChi-square test:")
-    print("Chi-square:", round(chi2, 4))
-    print("df:", dof)
-    print("p-value:", round(chi2_p, 6))
-
-    print("\nLogistic regression odds ratios:")
+    print("\nBinary chi-square test:")
+    print("Chi-square:", round(binary_chi2, 4))
+    print("df:", binary_dof)
+    print("p-value:", round(binary_chi2_p, 6))
     print(
-        or_table
-        .round(4)
-        .to_string(index=False)
+        "Minimum expected frequency:",
+        round(binary_expected_min, 4)
     )
 
-    # --------------------------------------------------------
-    # 6. Return results
-    # --------------------------------------------------------
+    if binary_expected_warning:
+        print(
+            "Warning: Some expected frequencies are below 5. "
+            "Interpret chi-square results cautiously."
+        )
+
+    print("\nFisher's exact robustness test (two-sided):")
+    print("Odds ratio (single vs multi):", round(fisher_odds_ratio, 4))
+    print("p-value:", round(fisher_p_value, 6))
+
+    print("\nBinary logistic regression odds ratios:")
+    print(binary_or_table.round(4).to_string(index=False))
 
     return {
         "h3_data": df,
-        "h3_summary": h3_summary,
-        "contingency_table": contingency,
-        "chi2": chi2,
-        "chi2_p": chi2_p,
-        "dof": dof,
-        "expected": expected,
-        "model": model,
-        "or_table": or_table
+        # Original three-category H3 outputs are intentionally disabled.
+        # "h4_summary": h4_summary,
+        # "contingency_table": contingency,
+        # "expected": expected,
+        # "chi2": chi2,
+        # "chi2_p": chi2_p,
+        # "dof": dof,
+        # "expected_min": expected_min,
+        # "expected_warning": expected_warning,
+        # "model": model,
+        # "or_table": or_table,
+        "binary_h3_data": binary_df,
+        "binary_h3_summary": binary_summary,
+        "binary_contingency_table": binary_contingency,
+        "binary_expected": binary_expected,
+        "binary_chi2": binary_chi2,
+        "binary_chi2_p": binary_chi2_p,
+        "binary_dof": binary_dof,
+        "binary_expected_min": binary_expected_min,
+        "binary_expected_warning": binary_expected_warning,
+        "fisher_odds_ratio": fisher_odds_ratio,
+        "fisher_p_value": fisher_p_value,
+        "binary_model": binary_model,
+        "binary_or_table": binary_or_table
     }
 
 
 if __name__ == "__main__":
     hvle_data = load_hvle_data()
-    test_h3_pet_age_group(hvle_data["hv_df"])
+    test_h3_purchase_structure(hvle_data["hv_df"])

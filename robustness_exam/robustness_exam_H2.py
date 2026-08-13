@@ -1,17 +1,33 @@
+"""H2 robustness: vary the value cutoff while holding engagement fixed.
+
+H2:
+Among high-value customers, low-engagement customers (HVLE) have a higher
+probability of failing to complete the fourth purchase than high-engagement
+customers (HVHE).
+
+Robustness logic
+----------------
+Only the high-value cutoff changes.  Engagement is always defined as:
+
+    engagement_count = review_written_yn + push_notification_consent_yn
+    low engagement  = engagement_count == 0
+    high engagement = engagement_count >= 1
+
+The median cutoff is the prespecified primary definition.  The 40th and 60th
+percentile cutoffs are sensitivity checks.  Continuous order value is not
+added as a regression control because this script tests the robustness of
+the value-based sample definition itself.
+"""
+
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from scipy.stats import chi2
-from sklearn.metrics import (
-    brier_score_loss,
-    log_loss,
-    roc_auc_score
-)
-from sklearn.model_selection import StratifiedKFold
+from scipy.stats import chi2_contingency
+from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparationError
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -23,295 +39,289 @@ if str(STUDY_1_DIR) not in sys.path:
 from quadrant_utils import load_hypothesis_data
 
 
-N_SPLITS = 5
-RANDOM_STATE = 42
+# The median is the primary H2 definition. The surrounding cutoffs alter only
+# the monetary boundary and leave the engagement definition unchanged.
+VALUE_CUTOFFS = [
+    ("Sensitivity: 40th percentile", 0.40),
+    ("Primary: median", 0.50),
+    ("Sensitivity: 60th percentile", 0.60),
+]
+PRIMARY_QUANTILE = 0.50
 
 
-def make_or_table(model):
-    params = model.params
-    conf = model.conf_int()
-
-    return pd.DataFrame({
-        "predictor": params.index,
-        "beta": params.values,
-        "odds_ratio": np.exp(params.values),
-        "ci_lower": np.exp(conf[0].values),
-        "ci_upper": np.exp(conf[1].values),
-        "p_value": model.pvalues.values
-    })
-
-
-def fit_nested_models(df, value_proxy):
-    model_cols = [
-        "churn_yn",
-        value_proxy,
-        "engagement_count"
-    ]
-
-    model_df = df.dropna(subset=model_cols).copy()
-
-    value_formula = f"churn_yn ~ {value_proxy}"
-    engagement_formula = (
-        f"churn_yn ~ {value_proxy} + engagement_count"
-    )
-
-    value_only_model = smf.logit(
-        formula=value_formula,
-        data=model_df
-    ).fit(disp=False)
-
-    value_engagement_model = smf.logit(
-        formula=engagement_formula,
-        data=model_df
-    ).fit(disp=False)
-
-    lr_stat = 2 * (
-        value_engagement_model.llf
-        - value_only_model.llf
-    )
-
-    lr_df = int(
-        value_engagement_model.df_model
-        - value_only_model.df_model
-    )
-
-    lr_p_value = chi2.sf(lr_stat, lr_df)
-
-    engagement_or_table = make_or_table(value_engagement_model)
-    engagement_row = engagement_or_table[
-        engagement_or_table["predictor"] == "engagement_count"
-    ].iloc[0]
-
-    return {
-        "model_df": model_df,
-        "value_only_model": value_only_model,
-        "value_engagement_model": value_engagement_model,
-        "lr_stat": lr_stat,
-        "lr_df": lr_df,
-        "lr_p_value": lr_p_value,
-        "engagement_or": engagement_row["odds_ratio"],
-        "engagement_ci_lower": engagement_row["ci_lower"],
-        "engagement_ci_upper": engagement_row["ci_upper"],
-        "engagement_p_value": engagement_row["p_value"],
-        "engagement_or_table": engagement_or_table
-    }
-
-
-def evaluate_oof_performance(model_df, value_proxy):
-    y = model_df["churn_yn"].astype(int).to_numpy()
-
-    x_value_only = model_df[[value_proxy]].astype(float)
-    x_value_engagement = model_df[
-        [
-            value_proxy,
-            "engagement_count"
-        ]
-    ].astype(float)
-
-    cv = StratifiedKFold(
-        n_splits=N_SPLITS,
-        shuffle=True,
-        random_state=RANDOM_STATE
-    )
-
-    pred_value_only = np.full(len(model_df), np.nan)
-    pred_value_engagement = np.full(len(model_df), np.nan)
-
-    for train_idx, test_idx in cv.split(x_value_only, y):
-        y_train = y[train_idx]
-
-        x_train_value_only = sm.add_constant(
-            x_value_only.iloc[train_idx],
-            has_constant="add"
-        )
-        x_test_value_only = sm.add_constant(
-            x_value_only.iloc[test_idx],
-            has_constant="add"
-        )
-
-        cv_value_only_model = sm.Logit(
-            y_train,
-            x_train_value_only
-        ).fit(disp=False)
-
-        pred_value_only[test_idx] = cv_value_only_model.predict(
-            x_test_value_only
-        )
-
-        x_train_value_engagement = sm.add_constant(
-            x_value_engagement.iloc[train_idx],
-            has_constant="add"
-        )
-        x_test_value_engagement = sm.add_constant(
-            x_value_engagement.iloc[test_idx],
-            has_constant="add"
-        )
-
-        cv_value_engagement_model = sm.Logit(
-            y_train,
-            x_train_value_engagement
-        ).fit(disp=False)
-
-        pred_value_engagement[test_idx] = (
-            cv_value_engagement_model.predict(
-                x_test_value_engagement
-            )
-        )
-
-    if (
-        np.isnan(pred_value_only).any()
-        or np.isnan(pred_value_engagement).any()
-    ):
-        raise ValueError("Out-of-fold predictions contain missing values.")
-
-    value_only_auc = roc_auc_score(y, pred_value_only)
-    value_engagement_auc = roc_auc_score(y, pred_value_engagement)
-
-    value_only_log_loss = log_loss(
-        y,
-        np.clip(pred_value_only, 1e-15, 1 - 1e-15)
-    )
-    value_engagement_log_loss = log_loss(
-        y,
-        np.clip(pred_value_engagement, 1e-15, 1 - 1e-15)
-    )
-
-    value_only_brier = brier_score_loss(y, pred_value_only)
-    value_engagement_brier = brier_score_loss(
-        y,
-        pred_value_engagement
-    )
-
-    return {
-        "value_only_auc": value_only_auc,
-        "value_engagement_auc": value_engagement_auc,
-        "auc_delta": value_engagement_auc - value_only_auc,
-        "value_only_log_loss": value_only_log_loss,
-        "value_engagement_log_loss": value_engagement_log_loss,
-        "log_loss_delta": (
-            value_only_log_loss
-            - value_engagement_log_loss
-        ),
-        "value_only_brier": value_only_brier,
-        "value_engagement_brier": value_engagement_brier,
-        "brier_delta": value_only_brier - value_engagement_brier
-    }
-
-
-def run_h2_robustness():
-    """
-    H2 robustness:
-    Test whether engagement_count improves model fit beyond the available
-    transaction-value proxy, log_order_unit_price.
-    """
-
-    data = load_hypothesis_data()
-    df = data["analysis_df"].copy()
+def prepare_analysis_data():
+    """Load the common H1/H2 cohort and verify the engagement definition."""
+    loaded = load_hypothesis_data()
+    df = loaded["analysis_df"].copy()
 
     required_cols = [
-        "churn_yn",
+        "order_unit_price",
+        "review_written_yn",
+        "push_notification_consent_yn",
         "engagement_count",
-        "order_unit_price"
+        "high_engagement",
+        "churn_yn",
     ]
-
-    missing = [c for c in required_cols if c not in df.columns]
+    missing = [col for col in required_cols if col not in df.columns]
     if missing:
-        raise ValueError(f"Missing columns: {missing}")
+        raise ValueError(f"H2 required columns are missing: {missing}")
 
     for col in required_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    invalid_binary = {}
+    for col in [
+        "review_written_yn",
+        "push_notification_consent_yn",
+        "high_engagement",
+        "churn_yn",
+    ]:
+        invalid = df.loc[df[col].notna() & ~df[col].isin([0, 1]), col]
+        if not invalid.empty:
+            invalid_binary[col] = sorted(invalid.unique().tolist())
+    if invalid_binary:
+        raise ValueError(f"Invalid binary values: {invalid_binary}")
+
+    model_cols = required_cols
+    df = df.dropna(subset=model_cols).copy()
     df = df[df["order_unit_price"] > 0].copy()
-    df["log_order_unit_price"] = np.log1p(df["order_unit_price"])
 
-    print("=" * 80)
-    print("=== H2 Robustness: Engagement Increment Beyond Value ===")
-    print("=" * 80)
-    print("Base analysis sample size:", len(df))
+    expected_count = (
+        df["review_written_yn"]
+        + df["push_notification_consent_yn"]
+    )
+    expected_high_engagement = expected_count.ge(1).astype(int)
 
-    summary_rows = []
-    model_results = {}
+    if not expected_count.equals(df["engagement_count"]):
+        raise ValueError(
+            "Stored engagement_count does not match the fixed H2 definition."
+        )
+    if not expected_high_engagement.equals(df["high_engagement"].astype(int)):
+        raise ValueError(
+            "Stored high_engagement does not match engagement_count >= 1."
+        )
 
-    value_proxy = "log_order_unit_price"
-    source_col = "order_unit_price"
+    if df.empty:
+        raise ValueError("The H2 analysis cohort is empty.")
 
-    nested = fit_nested_models(df, value_proxy)
-    performance = evaluate_oof_performance(
-        nested["model_df"],
-        value_proxy
+    return df, loaded["analysis_value_threshold"]
+
+
+def fit_h2_model(high_value_df, model_name):
+    """Estimate the HVLE-versus-HVHE churn difference at one value cutoff."""
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ConvergenceWarning)
+            model = smf.logit(
+                "churn_yn ~ HVLE_yn",
+                data=high_value_df,
+            ).fit(
+                disp=False,
+                maxiter=200,
+                cov_type="HC1",
+            )
+    except (PerfectSeparationError, np.linalg.LinAlgError) as exc:
+        raise RuntimeError(
+            f"{model_name} could not be estimated because of separation "
+            "or a singular matrix."
+        ) from exc
+
+    convergence_messages = [
+        str(item.message)
+        for item in caught
+        if issubclass(item.category, ConvergenceWarning)
+    ]
+    if not model.mle_retvals.get("converged", False) or convergence_messages:
+        raise RuntimeError(
+            f"{model_name} did not converge: {convergence_messages}"
+        )
+
+    return model
+
+
+def analyze_cutoff(base_df, cutoff_name, quantile):
+    """Construct one high-value sample and return descriptive/model results."""
+    cutoff_value = base_df["order_unit_price"].quantile(quantile)
+    high_value_df = base_df[
+        base_df["order_unit_price"] >= cutoff_value
+    ].copy()
+
+    # Engagement remains fixed across all cutoff analyses. Within each
+    # high-value sample, HVLE versus HVHE is therefore engagement-only.
+    high_value_df["HVLE_yn"] = (
+        high_value_df["high_engagement"].eq(0).astype(int)
+    )
+    high_value_df["group"] = high_value_df["HVLE_yn"].map(
+        {0: "HVHE", 1: "HVLE"}
     )
 
-    row = {
-        "value_proxy": value_proxy,
-        "source_col": source_col,
-        "n": len(nested["model_df"]),
-        "lr_chi2": nested["lr_stat"],
-        "lr_df": nested["lr_df"],
-        "lr_p_value": nested["lr_p_value"],
-        "engagement_or": nested["engagement_or"],
-        "engagement_ci_lower": nested["engagement_ci_lower"],
-        "engagement_ci_upper": nested["engagement_ci_upper"],
-        "engagement_p_value": nested["engagement_p_value"],
-        **performance
+    if set(high_value_df["HVLE_yn"].unique()) != {0, 1}:
+        raise ValueError(f"{cutoff_name} lacks either HVHE or HVLE customers.")
+    if set(high_value_df["churn_yn"].unique()) != {0, 1}:
+        raise ValueError(f"{cutoff_name} lacks one churn outcome class.")
+
+    contingency = (
+        pd.crosstab(high_value_df["group"], high_value_df["churn_yn"])
+        .reindex(index=["HVHE", "HVLE"], columns=[0, 1], fill_value=0)
+    )
+    if (contingency == 0).any().any():
+        raise ValueError(f"{cutoff_name} has an empty group-by-outcome cell.")
+
+    # Use the same uncorrected Pearson chi-square specification as the main
+    # H2-H5 hypothesis tests; avoid SciPy's automatic Yates correction for
+    # 2x2 tables so the method does not vary implicitly with table dimensions.
+    chi_square, chi_square_p, _, expected = chi2_contingency(
+        contingency,
+        correction=False,
+    )
+    model = fit_h2_model(high_value_df, cutoff_name)
+
+    coefficient = model.params["HVLE_yn"]
+    ci_low, ci_high = model.conf_int().loc["HVLE_yn"]
+
+    group_summary = (
+        high_value_df.groupby("group", observed=True)
+        .agg(
+            n=("churn_yn", "size"),
+            churn_n=("churn_yn", "sum"),
+            churn_rate=("churn_yn", "mean"),
+        )
+        .reindex(["HVHE", "HVLE"])
+    )
+    hvhe_rate = group_summary.loc["HVHE", "churn_rate"]
+    hvle_rate = group_summary.loc["HVLE", "churn_rate"]
+
+    result = {
+        "cutoff_definition": cutoff_name,
+        "value_quantile": quantile,
+        "cutoff_value": cutoff_value,
+        "high_value_n": len(high_value_df),
+        "HVHE_n": int(group_summary.loc["HVHE", "n"]),
+        "HVLE_n": int(group_summary.loc["HVLE", "n"]),
+        "HVHE_churn_percent": hvhe_rate * 100,
+        "HVLE_churn_percent": hvle_rate * 100,
+        "churn_difference_pp": (hvle_rate - hvhe_rate) * 100,
+        "HVLE_beta": coefficient,
+        "HVLE_OR": np.exp(coefficient),
+        "CI_lower": np.exp(ci_low),
+        "CI_upper": np.exp(ci_high),
+        "p_value": model.pvalues["HVLE_yn"],
+        "chi_square": chi_square,
+        "chi_square_p": chi_square_p,
+        "minimum_expected_count": expected.min(),
     }
 
-    summary_rows.append(row)
-    model_results[value_proxy] = {
-        **nested,
-        "performance": performance
+    return {
+        "analysis_df": high_value_df,
+        "group_summary": group_summary,
+        "contingency_table": contingency,
+        "model": model,
+        "result": result,
     }
 
-    print("\n" + "-" * 80)
-    print(f"Value proxy: {value_proxy} from {source_col}")
-    print("N:", row["n"])
+
+def run_h2_robustness():
+    """Run H2 under alternative value cutoffs with engagement held fixed."""
+    base_df, primary_loader_threshold = prepare_analysis_data()
+
+    analyses = {}
+    result_rows = []
+    previous_high_value_n = None
+
+    for cutoff_name, quantile in VALUE_CUTOFFS:
+        analysis = analyze_cutoff(base_df, cutoff_name, quantile)
+        analyses[quantile] = analysis
+        result_rows.append(analysis["result"])
+
+        current_n = analysis["result"]["high_value_n"]
+        if previous_high_value_n is not None and current_n > previous_high_value_n:
+            raise RuntimeError(
+                "High-value sample size increased under a stricter cutoff."
+            )
+        previous_high_value_n = current_n
+
+    results_df = pd.DataFrame(result_rows)
+    primary_cutoff = base_df["order_unit_price"].quantile(PRIMARY_QUANTILE)
+    if not np.isclose(primary_cutoff, primary_loader_threshold):
+        raise RuntimeError(
+            "The primary median cutoff differs from the main H1/H2 loader."
+        )
+
+    print("=" * 120)
+    print("H2 VALUE-CUTOFF ROBUSTNESS: ENGAGEMENT DEFINITION HELD FIXED")
+    print("=" * 120)
+    print(f"Base third-purchase cohort: {len(base_df)}")
     print(
-        "LR test: "
-        f"chi2 = {row['lr_chi2']:.4f}, "
-        f"df = {row['lr_df']}, "
-        f"p = {row['lr_p_value']:.6g}"
+        "Fixed engagement rule: low = 0 signals; high = at least 1 of "
+        "review writing or push-notification consent."
     )
     print(
-        "engagement_count OR: "
-        f"{row['engagement_or']:.4f}, "
-        f"95% CI = "
-        f"[{row['engagement_ci_lower']:.4f}, "
-        f"{row['engagement_ci_upper']:.4f}], "
-        f"p = {row['engagement_p_value']:.6g}"
+        "Only the order_unit_price cutoff changes; no continuous value "
+        "control is included in the regression."
     )
 
-    summary_df = pd.DataFrame(summary_rows)
-
-    print("\n" + "=" * 80)
-    print("H2 robustness summary table")
-    print("=" * 80)
+    display_cols = [
+        "cutoff_definition",
+        "cutoff_value",
+        "high_value_n",
+        "HVHE_n",
+        "HVLE_n",
+        "HVHE_churn_percent",
+        "HVLE_churn_percent",
+        "churn_difference_pp",
+        "HVLE_OR",
+        "CI_lower",
+        "CI_upper",
+        "p_value",
+    ]
+    print("\nH2 results across value definitions:")
     print(
-        summary_df[
-            [
-                "value_proxy",
-                "source_col",
-                "n",
-                "lr_chi2",
-                "lr_p_value",
-                "engagement_or",
-                "engagement_ci_lower",
-                "engagement_ci_upper",
-                "engagement_p_value",
-                "value_only_auc",
-                "value_engagement_auc",
-                "auc_delta",
-                "log_loss_delta",
-                "brier_delta"
-            ]
-        ].to_string(
+        results_df[display_cols].to_string(
             index=False,
-            float_format=lambda x: f"{x:.6f}"
+            formatters={
+                "cutoff_value": lambda x: f"{x:.2f}",
+                "HVHE_churn_percent": lambda x: f"{x:.2f}",
+                "HVLE_churn_percent": lambda x: f"{x:.2f}",
+                "churn_difference_pp": lambda x: f"{x:.2f}",
+                "HVLE_OR": lambda x: f"{x:.4f}",
+                "CI_lower": lambda x: f"{x:.4f}",
+                "CI_upper": lambda x: f"{x:.4f}",
+                "p_value": lambda x: f"{x:.6g}",
+            },
         )
     )
 
+    primary_result = results_df.loc[
+        np.isclose(results_df["value_quantile"], PRIMARY_QUANTILE)
+    ].iloc[0]
+    primary_supported = (
+        primary_result["HVLE_OR"] > 1
+        and primary_result["p_value"] < 0.05
+    )
+    direction_stable = bool((results_df["HVLE_OR"] > 1).all())
+    significance_stable = bool((results_df["p_value"] < 0.05).all())
+
+    print("\nPrimary H2 decision (median cutoff):")
+    if primary_supported:
+        print(
+            "H2 is supported: HVLE customers have significantly higher "
+            "fourth-purchase churn odds than HVHE customers."
+        )
+    else:
+        print("H2 is not supported at the prespecified median cutoff.")
+
+    print("\nValue-cutoff sensitivity conclusion:")
+    print(f"Direction stable across all cutoffs: {direction_stable}")
+    print(f"Statistically significant across all cutoffs: {significance_stable}")
+
     return {
-        "analysis_df": df,
-        "model_results": model_results,
-        "summary_df": summary_df
+        "base_df": base_df,
+        "cutoff_analyses": analyses,
+        "results_df": results_df,
+        "primary_quantile": PRIMARY_QUANTILE,
+        "primary_supported": primary_supported,
+        "direction_stable": direction_stable,
+        "significance_stable": significance_stable,
     }
 
 
