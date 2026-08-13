@@ -1,11 +1,31 @@
 # Value-Engagement Misalignment and Retention Risk in Pet E-Commerce
 
-This repository contains the analysis code for a pet e-commerce retention study. The project examines whether early customer value and observable engagement become misaligned, and whether that misalignment is associated with higher retention risk.
+---
 
-The empirical setting follows customers through their first three purchases and studies two related outcomes:
+This repository contains the analysis code used to support reproducibility for the study on **value-engagement misalignment and subsequent customer retention risk in pet e-commerce**.
 
-- Fourth-purchase churn among customers who completed their first three purchases.
-- Retention potential among high-value, low-engagement customers.
+The study examines whether customers with relatively high early transaction value but limited observable engagement signals exhibit different subsequent retention outcomes, and whether retention heterogeneity within this segment can be further identified using machine-learning methods.
+
+---
+
+## Research Overview
+
+This study examines value-engagement misalignment by classifying customers according to early transaction value and observable engagement signals.
+
+![Research overview](Figure%201.png)
+
+The core segmentation framework is:
+
+```text
+HVHE = High Value, High Engagement
+HVLE = High Value, Low Engagement
+LVHE = Low Value, High Engagement
+LVLE = Low Value, Low Engagement
+```
+
+The analysis first compares subsequent churn across engagement and value-engagement groups, then examines behavioral factors associated with HVLE membership and retention heterogeneity within the HVLE segment.
+
+---
 
 ## Project Structure
 
@@ -14,250 +34,311 @@ The empirical setting follows customers through their first three purchases and 
 |-- Data preprocessing/
 |   |-- data_cleaning.py
 |   `-- order_unit_price_EDA.py
+|
 |-- Study_1/
 |   `-- Hypothesis Exam/
 |       |-- quadrant_utils.py
 |       |-- hypothesis_exam_H1.py
 |       `-- hypothesis_exam_H2.py
+|
 |-- Study_2/
 |   |-- quadrant_utils.py
+|   |
 |   |-- Hypothesis Exam/
 |   |   |-- hypothesis_exam_H3.py
 |   |   `-- hypothesis_exam_H4.py
+|   |
 |   `-- survival_prediction/
 |       |-- survival_exam.py
 |       `-- study2b_shap.py
+|
 |-- robustness_exam/
 |   |-- robustness_exam_H1.py
 |   |-- robustness_exam_H2.py
 |   |-- robustness_exam_H3.py
 |   `-- robustness_exam_H4.py
-|-- original_data_english.csv
-`-- output/
+|
+|-- output/
+|
+`-- README.md
 ```
 
-## Data Pipeline
+---
+## Data Source
 
-The preprocessing script reads the raw transaction-level file:
+This study uses a publicly available pet e-commerce dataset released by Song (2025).
+
+* GitHub: [https://github.com/opusdeisong/Prediction-of-Private-Brand-Purchases-](https://github.com/opusdeisong/Prediction-of-Private-Brand-Purchases-)
+* Zenodo: [https://doi.org/10.5281/zenodo.16296754](https://doi.org/10.5281/zenodo.16296754)
+
+The dataset is not redistributed in this repository. Users can obtain it directly from the original GitHub repository or Zenodo archive.
+
+---
+
+## Data Preprocessing
+
+The main preprocessing script is:
 
 ```text
-original_data_english.csv
+Data preprocessing/data_cleaning.py
 ```
 
-and writes the cleaned analysis dataset to:
+The script prepares the customer-level analysis dataset used in the subsequent analyses.
+
+The processed dataset is saved to:
 
 ```text
 output/pet_data_clean_all_variables.csv
 ```
 
-The cleaning logic in `Data preprocessing/data_cleaning.py`:
-
-- standardizes missing-value encodings;
-- filters to customers with required signup, purchase, and pet-registration information;
-- converts binary Y/N variables to 0/1;
-- encodes pet species;
-- converts coupon fields into coupon-presence indicators;
-- fills count-like variables with 0 and time-like missing values with -1;
-- converts date variables to Unix timestamps;
-- adds latitude and longitude fields for available delivery-address categories;
-- preserves purchase-value outliers rather than deleting them.
-
-`Data preprocessing/order_unit_price_EDA.py` provides a focused distribution check for `order_unit_price` within the third-purchase cohort.
-
-## Core Definitions
-
-Most hypothesis tests use customers who completed their first three purchases:
+The following script provides exploratory analysis of the early transaction-value variable:
 
 ```text
-days_to_third_purchase_from_signup >= 0
-days_from_second_to_third_purchase >= 0
+Data preprocessing/order_unit_price_EDA.py
 ```
 
-The main churn outcome is:
+It summarizes the distribution of:
 
 ```text
-churn_yn = 1 if the customer did not complete a fourth purchase
-churn_yn = 0 if the customer completed a fourth purchase
+order_unit_price
 ```
 
-Early observable engagement is defined from two signals:
+within the third-purchase analysis cohort.
+
+---
+
+## Core Variable Definitions
+
+### Analysis Cohort
+
+The main hypothesis analyses focus on customers who completed their first three purchases.
+
+Operationally, these observations satisfy the purchase-timing conditions required to identify a completed third purchase.
+
+---
+
+### Subsequent Retention Outcome
+
+Within the third-purchase cohort, customer retention status is classified according to whether a fourth purchase is subsequently observed.
 
 ```text
-engagement_count = review_written_yn + push_notification_consent_yn
+survive_yn = 1  -> fourth purchase observed
+survive_yn = 0  -> fourth purchase not observed
+
+churn_yn = 1    -> fourth purchase not observed
+churn_yn = 0    -> fourth purchase observed
+```
+
+---
+
+### Early Observable Engagement
+
+Two observable engagement-related signals are used:
+
+```text
+review_written_yn
+push_notification_consent_yn
+```
+
+The combined engagement measure is:
+
+```text
+engagement_count =
+review_written_yn + push_notification_consent_yn
+```
+
+Engagement status is defined as:
+
+```text
 high_engagement = 1 if engagement_count >= 1
 high_engagement = 0 if engagement_count == 0
 ```
 
-High-value customers are identified using the median `order_unit_price` within the relevant analysis sample:
+---
+
+### Early Transaction Value
+
+Early transaction value is measured using:
 
 ```text
-high_value = 1 if order_unit_price >= sample median
+order_unit_price
+```
+
+Among customers who completed their first three purchases, the median of `order_unit_price` is used as the primary cutoff for distinguishing relatively high-value and low-value customers.
+
+```text
+high_value = 1 if order_unit_price >= median
 high_value = 0 otherwise
 ```
 
-The project uses four value-engagement quadrants:
+For regression analyses in which transaction value is entered as a continuous covariate, a logarithmic transformation is used to reduce the influence of the strongly right-skewed distribution.
+
+---
+
+# Study 1: Engagement and Subsequent Churn
+
+Study 1 examines the relationship between observable early engagement-related signals and subsequent churn.
+
+---
+
+## H1 Analysis
+
+Main script:
 
 ```text
-HVHE = high value, high engagement
-HVLE = high value, low engagement
-LVHE = low value, high engagement
-LVLE = low value, low engagement
+Study_1/Hypothesis Exam/hypothesis_exam_H1.py
 ```
 
-## Study 1: Fourth-Purchase Churn
+The analysis evaluates whether a greater number of observable early engagement signals is associated with a lower likelihood of subsequent churn.
 
-Study 1 tests whether early engagement and value-engagement misalignment are associated with fourth-purchase churn.
-
-`Study_1/Hypothesis Exam/hypothesis_exam_H1.py`
-
-Tests whether customers with more early observable engagement signals have lower fourth-purchase churn.
-
-Main models:
+Main logistic-regression specifications include:
 
 ```text
 churn_yn ~ engagement_count
+```
+
+and:
+
+```text
 churn_yn ~ engagement_count + log_order_unit_price
 ```
 
-`Study_1/Hypothesis Exam/hypothesis_exam_H2.py`
+---
 
-Tests whether, among high-value customers, HVLE customers have higher fourth-purchase churn than HVHE customers.
+## H2 Analysis
 
-Main models:
+Main script:
+
+```text
+Study_1/Hypothesis Exam/hypothesis_exam_H2.py
+```
+
+This analysis focuses on high-value customers and compares HVLE customers with HVHE customers.
+
+The principal model examines:
 
 ```text
 churn_yn ~ HVLE_yn
+```
+
+with an additional specification controlling for continuous early transaction value:
+
+```text
 churn_yn ~ HVLE_yn + log_order_unit_price
 ```
 
-The script also reports group-level churn rates, chi-square tests, odds ratios, confidence intervals, and final hypothesis decisions.
+---
 
-## Study 2: HVLE Formation and Retention Potential
+# Study 2A: Factors Associated with HVLE Membership
 
-Study 2 focuses on the high-value sample and examines which behavioral patterns are associated with becoming HVLE rather than HVHE.
+Study 2A focuses on high-value customers and examines behavioral characteristics associated with belonging to the HVLE rather than HVHE segment.
 
-`Study_2/Hypothesis Exam/hypothesis_exam_H3.py`
-
-Tests whether purchase structure is associated with HVLE formation among high-value customers.
-
-The script classifies the first-three-purchase basket structure into:
+The dependent variable is HVLE membership among customers already classified as high value:
 
 ```text
-multi_category
-single_category
+HVLE membership
 ```
 
-and estimates whether single-category purchasers differ from multi-category purchasers in their probability of being HVLE.
+---
 
-`Study_2/Hypothesis Exam/hypothesis_exam_H4.py`
+## Purchase Structure Analysis
 
-Tests whether PB purchase behavior is associated with HVLE formation among high-value customers.
+Main script:
 
-Main predictor:
+```text
+Study_2/Hypothesis Exam/hypothesis_exam_H3.py
+```
+
+Customers' purchase structures across their first three purchases are categorized as:
+
+```text
+single_category
+multi_category
+```
+
+The analysis evaluates whether customers whose early purchases are concentrated in a single product category are more likely to belong to the HVLE segment.
+
+---
+
+## Private-Brand Purchase Analysis
+
+Main script:
+
+```text
+Study_2/Hypothesis Exam/hypothesis_exam_H4.py
+```
+
+The principal explanatory variable is:
 
 ```text
 pb_purchase_yn
 ```
 
-The script reports descriptive summaries, chi-square tests, Fisher exact tests, and logistic-regression odds ratios.
+This variable identifies whether a customer purchased at least one private-brand product during the early purchase period.
 
-## Study 2B: HVLE Retention Prediction
+The analysis evaluates the association between private-brand purchasing and HVLE membership.
 
-`Study_2/survival_prediction/survival_exam.py` builds a leakage-aware retention-prediction dataset for HVLE customers and compares multiple classifiers for predicting:
+---
+
+# Study 2B: HVLE Retention Prediction
+
+Study 2B examines retention heterogeneity within the HVLE customer segment.
+
+Main prediction script:
+
+```text
+Study_2/survival_prediction/survival_exam.py
+```
+
+The prediction target is:
 
 ```text
 survive_yn = 1
 ```
 
-Candidate predictors include first-three-purchase category behavior, PB/NB purchase ratios, coupon use, delivery timing, purchase intervals, pet characteristics, and calendar timing.
+indicating that a subsequent fourth purchase is observed.
 
-The model comparison uses stratified 5-fold cross-validation and reports:
+---
 
-- precision;
-- recall;
-- F1-score;
-- AUC;
-- Brier score;
-- precision and lift among the top 20% highest predicted retention-potential customers.
+## Prediction Models
 
-Available models include Random Forest, Decision Tree, Logistic Regression, MLP, and LightGBM when `lightgbm` is installed.
-
-`Study_2/survival_prediction/study2b_shap.py`
-
-Runs SHAP interpretation for the model selected by the Study 2B selection rule:
+The following models are compared:
 
 ```text
-AUC -> Precision@20% -> F1-score -> Recall
+Random Forest
+LightGBM
+Logistic Regression
+Decision Tree
+Multilayer Perceptron
 ```
 
-The SHAP script uses an 80/20 stratified holdout split and saves summary figures to:
+LightGBM is included when the `lightgbm` package is available.
+
+---
+
+## SHAP Interpretation
+
+Main script:
+
+```text
+Study_2/survival_prediction/study2b_shap.py
+```
+
+SHAP analysis is used to examine the contribution of individual predictors to model predictions within the HVLE segment.
+
+The script generates feature-importance outputs and SHAP summary figures.
+
+Outputs are saved to:
 
 ```text
 output/study_2b_hvle_retention_shap/
 ```
 
-## Robustness Checks
+---
 
-The `robustness_exam/` directory contains sensitivity analyses aligned with the main hypotheses:
+# Python Dependencies
 
-- `robustness_exam_H1.py`: replaces the composite engagement count with each engagement signal separately.
-- `robustness_exam_H2.py`: varies the high-value cutoff across the 40th percentile, median, and 60th percentile while holding the engagement definition fixed.
-- `robustness_exam_H3.py`: tests the purchase-structure effect with sequential controls for purchase timing, pet species, and pet age.
-- `robustness_exam_H4.py`: tests the PB-purchase effect with sequential controls for purchase timing, pet characteristics, and purchase structure.
-
-## How to Run
-
-Run all commands from the project root:
-
-```powershell
-cd "D:\mum_baby\pet commerce"
-```
-
-First generate the cleaned dataset:
-
-```powershell
-.\.venv\Scripts\python.exe "Data preprocessing\data_cleaning.py"
-```
-
-Optional EDA:
-
-```powershell
-.\.venv\Scripts\python.exe "Data preprocessing\order_unit_price_EDA.py"
-```
-
-Run Study 1:
-
-```powershell
-.\.venv\Scripts\python.exe "Study_1\Hypothesis Exam\hypothesis_exam_H1.py"
-.\.venv\Scripts\python.exe "Study_1\Hypothesis Exam\hypothesis_exam_H2.py"
-```
-
-Run Study 2:
-
-```powershell
-.\.venv\Scripts\python.exe "Study_2\Hypothesis Exam\hypothesis_exam_H3.py"
-.\.venv\Scripts\python.exe "Study_2\Hypothesis Exam\hypothesis_exam_H4.py"
-```
-
-Run Study 2B prediction and SHAP analysis:
-
-```powershell
-.\.venv\Scripts\python.exe "Study_2\survival_prediction\survival_exam.py"
-.\.venv\Scripts\python.exe "Study_2\survival_prediction\study2b_shap.py"
-```
-
-Run robustness checks:
-
-```powershell
-.\.venv\Scripts\python.exe "robustness_exam\robustness_exam_H1.py"
-.\.venv\Scripts\python.exe "robustness_exam\robustness_exam_H2.py"
-.\.venv\Scripts\python.exe "robustness_exam\robustness_exam_H3.py"
-.\.venv\Scripts\python.exe "robustness_exam\robustness_exam_H4.py"
-```
-
-## Python Dependencies
-
-The scripts use common scientific Python packages:
+The analyses use the following Python packages:
 
 ```text
 pandas
@@ -270,10 +351,16 @@ shap
 lightgbm
 ```
 
-`lightgbm` is optional for `survival_exam.py`; the script will still run without it, using the remaining models. `shap` is required for `study2b_shap.py`.
+`lightgbm` is required only for the LightGBM model.
+
+`shap` is required for the SHAP interpretation analysis.
+
+For reproducibility, users are encouraged to install package versions consistent with the environment reported in the repository's dependency file, when available.
+
+---
 
 ## Notes
 
-The analysis code expects `output/pet_data_clean_all_variables.csv` to exist before running the hypothesis, robustness, prediction, or SHAP scripts. Generate it with `Data preprocessing/data_cleaning.py` whenever the raw data or cleaning rules change.
+This repository is intended to reproduce the analyses reported in the associated research study.
 
-The raw data file may contain commercially sensitive platform data. Check data-sharing permissions before making the repository public.
+The original third-party dataset remains subject to the terms and conditions specified by its original provider.
