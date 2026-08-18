@@ -9,7 +9,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import brier_score_loss, f1_score, make_scorer, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import brier_score_loss, f1_score, make_scorer, recall_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_validate
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
@@ -30,11 +30,13 @@ from quadrant_utils import load_hvle_data
 
 
 warnings.filterwarnings("ignore")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 RANDOM_STATE = 42
 N_SPLITS = 5
 TOP_RATE = 0.20
-METRIC_COLS = ["precision", "recall", "f1", "auc"]
+METRIC_COLS = ["recall", "f1", "auc"]
 
 TEXT_COLS = {
     "first_order_coupon_name",
@@ -124,7 +126,7 @@ def coupon_used(series):
 
 
 def format_mean_sd(mean_value, sd_value):
-    return f"{mean_value:.4f} +/- {sd_value:.4f}"
+    return f"{mean_value:.4f} ± {sd_value:.4f}"
 
 
 def build_study_2b_retention_features(file_path=None):
@@ -328,48 +330,94 @@ def retention_potential_ranking_metrics(y_true, survival_score):
     baseline = ranking["survive_yn"].mean()
     precision_at_20 = top_group["survive_yn"].mean()
     return {
-        "ranking_source": "stratified_5fold_oof_predictions",
-        "oof_auc": roc_auc_score(y_true, survival_score),
         "evaluated_n": len(ranking),
         "top_n": top_n,
         "baseline_retention_rate": baseline,
         "precision_at_20pct": precision_at_20,
-        "lift_at_20pct": precision_at_20 / baseline if baseline > 0 else np.nan,
         "actual_retained_n_in_top_20pct": int(top_group["survive_yn"].sum()),
     }
+
+
+def validation_fold_oof_metrics(X, y, survival_score, cv):
+    y_array = np.asarray(y).astype(int)
+    score_array = np.asarray(survival_score)
+    fold_rows = []
+
+    for fold_idx, (_, valid_idx) in enumerate(cv.split(X, y), start=1):
+        y_valid = y_array[valid_idx]
+        score_valid = score_array[valid_idx]
+        ranking = retention_potential_ranking_metrics(y_valid, score_valid)
+        fold_rows.append({
+            "fold": fold_idx,
+            "brier_score": brier_score_loss(y_valid, score_valid),
+            **ranking,
+        })
+
+    return pd.DataFrame(fold_rows)
 
 
 def evaluate_model(model_name, classifier, preprocessor, X, y, cv, scoring):
     pipeline = Pipeline([("preprocessor", preprocessor), ("model", classifier)])
     cv_result = cross_validate(pipeline, X, y, cv=cv, scoring=scoring, n_jobs=1)
     oof_survival_score = cross_val_predict(pipeline, X, y, cv=cv, method="predict_proba", n_jobs=1)[:, 1]
+    oof_fold_metrics = validation_fold_oof_metrics(X, y, oof_survival_score, cv)
 
     result = {"model": model_name}
     for metric in METRIC_COLS:
         values = cv_result[f"test_{metric}"]
         result[f"{metric}_mean"] = values.mean()
         result[f"{metric}_sd"] = values.std(ddof=1)
-    result["brier_score"] = brier_score_loss(y, oof_survival_score)
+    for metric in ["brier_score", "precision_at_20pct"]:
+        values = oof_fold_metrics[metric]
+        result[f"{metric}_mean"] = values.mean()
+        result[f"{metric}_sd"] = values.std(ddof=1)
 
-    ranking = {"model": model_name, **retention_potential_ranking_metrics(y, oof_survival_score)}
+    ranking = {
+        "model": model_name,
+        "top_n_mean": oof_fold_metrics["top_n"].mean(),
+        "top_n_sd": oof_fold_metrics["top_n"].std(ddof=1),
+        "baseline_retention_rate_mean": oof_fold_metrics["baseline_retention_rate"].mean(),
+        "baseline_retention_rate_sd": oof_fold_metrics["baseline_retention_rate"].std(ddof=1),
+        "precision_at_20pct_mean": result["precision_at_20pct_mean"],
+        "precision_at_20pct_sd": result["precision_at_20pct_sd"],
+        "actual_retained_n_in_top_20pct_mean": oof_fold_metrics["actual_retained_n_in_top_20pct"].mean(),
+        "actual_retained_n_in_top_20pct_sd": oof_fold_metrics["actual_retained_n_in_top_20pct"].std(ddof=1),
+    }
     folds = pd.DataFrame({
         "model": model_name,
         "fold": np.arange(1, N_SPLITS + 1),
-        "precision": cv_result["test_precision"],
         "recall": cv_result["test_recall"],
         "f1": cv_result["test_f1"],
         "auc": cv_result["test_auc"],
     })
+    folds = folds.merge(
+        oof_fold_metrics[
+            [
+                "fold",
+                "brier_score",
+                "precision_at_20pct",
+                "actual_retained_n_in_top_20pct",
+                "top_n",
+            ]
+        ],
+        on="fold",
+    )
     return result, ranking, folds
 
 
 def select_overall_best_model(results_df, ranking_df):
     selection = results_df.merge(
-        ranking_df[["model", "precision_at_20pct", "lift_at_20pct", "actual_retained_n_in_top_20pct"]],
+        ranking_df[
+            [
+                "model",
+                "actual_retained_n_in_top_20pct_mean",
+                "actual_retained_n_in_top_20pct_sd",
+            ]
+        ],
         on="model",
     )
     selection = selection.sort_values(
-        ["auc_mean", "precision_at_20pct", "f1_mean", "recall_mean"],
+        ["auc_mean", "precision_at_20pct_mean", "f1_mean", "recall_mean"],
         ascending=[False, False, False, False],
     ).reset_index(drop=True)
     selection["overall_rank"] = np.arange(1, len(selection) + 1)
@@ -389,18 +437,22 @@ def run_model_comparison(modeling_df, feature_cols, target_col):
     preprocessor = build_preprocessor(numeric, categorical)
     cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
     scoring = {
-        "precision": make_scorer(precision_score, zero_division=0),
         "recall": make_scorer(recall_score, zero_division=0),
         "f1": make_scorer(f1_score, zero_division=0),
         "auc": "roc_auc",
     }
 
+    models = build_models()
     outputs = [
         evaluate_model(name, model, preprocessor, X, y, cv, scoring)
-        for name, model in build_models().items()
+        for name, model in models.items()
     ]
     results_df = pd.DataFrame([item[0] for item in outputs]).sort_values("auc_mean", ascending=False).reset_index(drop=True)
-    ranking_df = pd.DataFrame([item[1] for item in outputs]).sort_values(["precision_at_20pct", "lift_at_20pct"], ascending=False).reset_index(drop=True)
+    ranking_df = (
+        pd.DataFrame([item[1] for item in outputs])
+        .sort_values("precision_at_20pct_mean", ascending=False)
+        .reset_index(drop=True)
+    )
     fold_results_df = pd.concat([item[2] for item in outputs], ignore_index=True)
     selection_df = select_overall_best_model(results_df, ranking_df)
     final_model = selection_df.iloc[0]["model"]
@@ -413,12 +465,11 @@ def run_model_comparison(modeling_df, feature_cols, target_col):
         "results_df": results_df,
         "fold_results_df": fold_results_df,
         "ranking_results_df": ranking_df,
-        "top20_ranking_df": ranking_df,
         "overall_selection_df": selection_df,
         "shap_model_name": final_model,
         "final_model_name": final_model,
         "best_top20_model": ranking_df.iloc[0]["model"],
-        "models": build_models(),
+        "models": models,
         "random_state": RANDOM_STATE,
         "n_splits": N_SPLITS,
     }
@@ -441,7 +492,17 @@ def print_results(target_col, numeric, categorical, results_df, ranking_df, fold
 
     print("\nFold-level metrics:")
     for fold_idx in range(1, N_SPLITS + 1):
-        current = fold_df.loc[fold_df["fold"] == fold_idx, ["model", "precision", "recall", "f1", "auc"]]
+        current = fold_df.loc[
+            fold_df["fold"] == fold_idx,
+            [
+                "model",
+                "recall",
+                "f1",
+                "auc",
+                "brier_score",
+                "precision_at_20pct",
+            ],
+        ]
         print("\n" + "-" * 70)
         print(f"Fold {fold_idx}")
         print("-" * 70)
@@ -450,84 +511,46 @@ def print_results(target_col, numeric, categorical, results_df, ranking_df, fold
     print("\n" + "=" * 70)
     print("=== Model Performance Summary ===")
     print("=" * 70)
-    summary = results_df.merge(
-        ranking_df[["model", "precision_at_20pct", "lift_at_20pct"]],
-        on="model",
-    )
-    summary = summary[
-        [
-            "model",
-            "precision_mean",
-            "recall_mean",
-            "f1_mean",
-            "auc_mean",
-            "brier_score",
-            "precision_at_20pct",
-            "lift_at_20pct",
-        ]
-    ].rename(
-        columns={
-            "model": "Model",
-            "precision_mean": "Precision",
-            "recall_mean": "Recall",
-            "f1_mean": "F1-score",
-            "auc_mean": "AUC",
-            "brier_score": "Brier score",
-            "precision_at_20pct": "Precision@20%",
-            "lift_at_20pct": "Lift@20%",
-        }
-    )
-    print(summary.round(4).to_string(index=False))
-
-    print("\n" + "=" * 70)
-    print("=== Overall Model Selection for Study 2B Retention Prediction ===")
-    print("=" * 70)
-    print("Selection rule: AUC -> Precision@20% -> F1-score -> Recall")
-    selection_cols = [
-        "overall_rank",
-        "model",
-        "precision_mean",
-        "recall_mean",
-        "f1_mean",
-        "auc_mean",
-        "brier_score",
-        "precision_at_20pct",
-        "lift_at_20pct",
-        "actual_retained_n_in_top_20pct",
-    ]
-    selection_summary = selection_df[selection_cols].rename(
-        columns={
-            "overall_rank": "Rank",
-            "model": "Model",
-            "precision_mean": "Precision",
-            "recall_mean": "Recall",
-            "f1_mean": "F1-score",
-            "auc_mean": "AUC",
-            "brier_score": "Brier score",
-            "precision_at_20pct": "Precision@20%",
-            "lift_at_20pct": "Lift@20%",
-            "actual_retained_n_in_top_20pct": "Actual retained@20%",
-        }
-    )
-    print(selection_summary.round(4).to_string(index=False))
-    print(
-        "\nFinal model for SHAP:",
-        selection_df.iloc[0]["model"],
-        "(selected by AUC, then Precision@20%, then F1-score, then Recall)",
-    )
-    print(
-        "Best mean CV AUC model:",
-        results_df.iloc[0]["model"],
-        f"({results_df.iloc[0]['auc_mean']:.4f})",
-    )
-    print(
-        "Best Top-20% retention-potential ranking model:",
-        ranking_df.iloc[0]["model"],
-        f"(precision@20%={ranking_df.iloc[0]['precision_at_20pct']:.4f}, "
-        f"lift@20%={ranking_df.iloc[0]['lift_at_20pct']:.4f}, "
-        f"actual retained={int(ranking_df.iloc[0]['actual_retained_n_in_top_20pct'])}/"
-        f"{int(ranking_df.iloc[0]['top_n'])})",
-    )
+    summary = results_df.copy()
+    summary_display = pd.DataFrame({
+        "Model": summary["model"],
+        "Recall": [
+            format_mean_sd(mean, sd)
+            for mean, sd in zip(
+                summary["recall_mean"],
+                summary["recall_sd"],
+            )
+        ],
+        "F1-score": [
+            format_mean_sd(mean, sd)
+            for mean, sd in zip(
+                summary["f1_mean"],
+                summary["f1_sd"],
+            )
+        ],
+        "AUC": [
+            format_mean_sd(mean, sd)
+            for mean, sd in zip(
+                summary["auc_mean"],
+                summary["auc_sd"],
+            )
+        ],
+        "Brier score": [
+            format_mean_sd(mean, sd)
+            for mean, sd in zip(
+                summary["brier_score_mean"],
+                summary["brier_score_sd"],
+            )
+        ],
+        "Precision@20%": [
+            format_mean_sd(mean, sd)
+            for mean, sd in zip(
+                summary["precision_at_20pct_mean"],
+                summary["precision_at_20pct_sd"],
+            )
+        ],
+    })
+    print(summary_display.to_string(index=False))
     print("Interpretation note: SHAP values are model-specific predictive explanations.")
 
 

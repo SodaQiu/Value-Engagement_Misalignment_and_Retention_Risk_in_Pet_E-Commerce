@@ -36,17 +36,21 @@ The analysis first compares subsequent churn across engagement and value-engagem
 |   `-- order_unit_price_EDA.py
 |
 |-- Study_1/
-|   `-- Hypothesis Exam/
-|       |-- quadrant_utils.py
-|       |-- hypothesis_exam_H1.py
-|       `-- hypothesis_exam_H2.py
+|   |-- Hypothesis Exam/
+|   |   |-- quadrant_utils.py
+|   |   |-- hypothesis_exam_H1.py
+|   |   `-- hypothesis_exam_H2.py
+|   |
+|   `-- supplementary_analysis/
+|       |-- h1_zero_vs_two_signals.py
+|       `-- value_engagement_interaction.py
 |
 |-- Study_2/
 |   |-- quadrant_utils.py
 |   |
 |   |-- Hypothesis Exam/
 |   |   |-- hypothesis_exam_H3.py
-|   |   `-- hypothesis_exam_H4.py
+|   |   `-- exploratory_pb_purchase_hvle.py
 |   |
 |   `-- survival_prediction/
 |       |-- survival_exam.py
@@ -203,6 +207,14 @@ and:
 churn_yn ~ engagement_count + log_order_unit_price
 ```
 
+Supplementary H1 scripts are provided in:
+
+```text
+Study_1/supplementary_analysis/
+```
+
+These scripts report a stricter zero-versus-two-signal contrast and a value-engagement interaction analysis.
+
 ---
 
 ## H2 Analysis
@@ -260,12 +272,12 @@ The analysis evaluates whether customers whose early purchases are concentrated 
 
 ---
 
-## Private-Brand Purchase Analysis
+## Exploratory Private-Brand Purchase Analysis
 
 Main script:
 
 ```text
-Study_2/Hypothesis Exam/hypothesis_exam_H4.py
+Study_2/Hypothesis Exam/exploratory_pb_purchase_hvle.py
 ```
 
 The principal explanatory variable is:
@@ -276,7 +288,7 @@ pb_purchase_yn
 
 This variable identifies whether a customer purchased at least one private-brand product during the early purchase period.
 
-The analysis evaluates the association between private-brand purchasing and HVLE membership.
+This exploratory analysis evaluates the association between private-brand purchasing and HVLE membership.
 
 ---
 
@@ -335,4 +347,3 @@ output/study_2b_hvle_retention_shap/
 ```
 
 ---
-
