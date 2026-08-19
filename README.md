@@ -1,9 +1,28 @@
-# Value-Engagement Misalignment and Retention Risk in Pet E-Commerce
+# Beyond Transaction Value: Value–Engagement Misalignment and Retention Heterogeneity in Pet E-Commerce
 
-This repository contains the analysis code used to support reproducibility for a study of **value-engagement misalignment and subsequent retention in pet e-commerce**.
+## Description
 
-The study examines whether customers with relatively high early transaction value but limited observable engagement signals exhibit different subsequent outcomes, and whether retention heterogeneity within this segment can be further identified using machine-learning methods.
+This repository contains the analysis code used to support reproducibility for a study of **value–engagement misalignment and retention heterogeneity in pet e-commerce**.
 
+The study examines whether observable early engagement signals provide additional information beyond early transaction value for distinguishing subsequent customer outcomes. It further identifies high-value, low-engagement (HVLE) customers as a value–engagement misalignment segment and examines behavioral characteristics and retention heterogeneity within this segment.
+
+**Background**: Transaction-based customer segmentation can identify economically important customers, but relatively high early transaction value does not necessarily imply a continuing customer relationship. Observable relationship signals may therefore provide additional information for distinguishing subsequent retention outcomes. :contentReference[oaicite:1]{index=1}
+
+**Framework**: The study proposes a sequential customer management framework of **transaction value identification, misalignment diagnosis, and internal retention stratification**. Transaction value is first used to identify high-value customers, observable early engagement signals are then used to diagnose value–engagement misalignment, and predictive models are subsequently used to distinguish retention potential within the HVLE segment. :contentReference[oaicite:2]{index=2}
+
+**Key Findings**: A greater number of observable early engagement signals was associated with a lower likelihood of fourth-purchase non-completion. Among high-value customers, HVLE customers showed poorer subsequent retention outcomes than high-value, high-engagement (HVHE) customers. Single-category purchasing was associated with a higher likelihood of HVLE membership, whereas exploratory analysis showed that private-brand purchasing was associated with a lower likelihood of HVLE membership. Within the HVLE segment, purchase timing and progression features provided the strongest predictive information for subsequent retention. :contentReference[oaicite:3]{index=3}
+
+## Research Framework
+
+![Research overview](Figure%201.png)
+
+Customers are classified according to early transaction value and observable engagement signals:
+
+```text
+HVHE = High Value, High Engagement
+HVLE = High Value, Low Engagement
+LVHE = Low Value, High Engagement
+LVLE = Low Value, Low Engagement
 ## Research Overview
 
 ![Research overview](Figure%201.png)
@@ -178,35 +197,5 @@ SHAP is used to interpret the contribution of individual predictors to retention
 `-- README.md
 ```
 
-## Main Scripts
-
-Data preprocessing:
-
-```text
-Data preprocessing/data_cleaning.py
-Data preprocessing/order_unit_price_EDA.py
-```
-
-Study 1:
-
-```text
-Study_1/Hypothesis Exam/hypothesis_exam_H1.py
-Study_1/Hypothesis Exam/hypothesis_exam_H2.py
-Study_1/supplementary_analysis/h1_zero_vs_two_signals.py
-Study_1/supplementary_analysis/value_engagement_interaction.py
-```
-
-Study 2:
-
-```text
-Study_2/Hypothesis Exam/hypothesis_exam_H3.py
-Study_2/Hypothesis Exam/exploratory_pb_purchase_hvle.py
-Study_2/survival_prediction/survival_exam.py
-Study_2/survival_prediction/study2b_shap.py
-```
-
-Generated analysis outputs are stored under:
-
-```text
-output/
-```
+## Conclusion
+Based on the above results, this study proposes a customer management idea of ​​"transaction value identification - misalignment diagnosis - internal retention stratification". This framework can provide a basis for the pet e-commerce platform to further differentiate high-value customers and optimize the allocation of limited customer maintenance resources.
