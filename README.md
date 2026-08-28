@@ -14,8 +14,6 @@ The study examines whether observable early engagement signals provide additiona
 
 ## Research Framework
 
-![Research overview](Figure%201.png)
-
 Customers are classified according to early transaction value and observable engagement signals:
 
 ```text
@@ -23,9 +21,8 @@ HVHE = High Value, High Engagement
 HVLE = High Value, Low Engagement
 LVHE = Low Value, High Engagement
 LVLE = Low Value, Low Engagement
-## Research Overview
 
-![Research overview](Figure%201.png)
+## Research Overvie
 
 Customers are classified according to early transaction value and observable engagement signals:
 
