@@ -2,8 +2,6 @@
 
 ## Description
 
-This repository contains the analysis code used to support reproducibility for a study of **value-engagement misalignment and retention heterogeneity in pet e-commerce**.
-
 The study examines whether observable early engagement signals provide additional information beyond early transaction value for distinguishing subsequent customer outcomes. It further identifies high-value, low-engagement (HVLE) customers as a value-engagement misalignment segment and examines behavioral characteristics and retention heterogeneity within this segment.
 
 **Background:** Transaction-based customer segmentation can identify economically important customers, but relatively high early transaction value does not necessarily imply a continuing customer relationship. Observable relationship signals may therefore provide additional information for distinguishing subsequent retention outcomes.
