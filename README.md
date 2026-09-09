@@ -1,4 +1,4 @@
-﻿# Beyond Transaction Value: Value鈥揈ngagement Misalignment and Retention Heterogeneity in Pet E-Commerce
+﻿# From Transaction Value to Relationship Signals: A Progressive Customer Differentiation Framework in Pet E-Commerce
 
 ## Description
 
