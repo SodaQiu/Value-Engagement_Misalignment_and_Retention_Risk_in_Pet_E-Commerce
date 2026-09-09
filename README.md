@@ -1,14 +1,14 @@
-# Beyond Transaction Value: Value–Engagement Misalignment and Retention Heterogeneity in Pet E-Commerce
+﻿# Beyond Transaction Value: Value鈥揈ngagement Misalignment and Retention Heterogeneity in Pet E-Commerce
 
 ## Description
 
-This repository contains the analysis code used to support reproducibility for a study of **value–engagement misalignment and retention heterogeneity in pet e-commerce**.
+This repository contains the analysis code used to support reproducibility for a study of **value鈥揺ngagement misalignment and retention heterogeneity in pet e-commerce**.
 
-The study examines whether observable early engagement signals provide additional information beyond early transaction value for distinguishing subsequent customer outcomes. It further identifies high-value, low-engagement (HVLE) customers as a value–engagement misalignment segment and examines behavioral characteristics and retention heterogeneity within this segment.
+The study examines whether observable early engagement signals provide additional information beyond early transaction value for distinguishing subsequent customer outcomes. It further identifies high-value, low-engagement (HVLE) customers as a value鈥揺ngagement misalignment segment and examines behavioral characteristics and retention heterogeneity within this segment.
 
 **Background:** Transaction-based customer segmentation can identify economically important customers, but relatively high early transaction value does not necessarily imply a continuing customer relationship. Observable relationship signals may therefore provide additional information for distinguishing subsequent retention outcomes.
 
-**Framework:** The study proposes a sequential customer management framework of **transaction value identification, misalignment diagnosis, and internal retention stratification**. Transaction value is first used to identify high-value customers, observable early engagement signals are then used to diagnose value–engagement misalignment, and predictive models are subsequently used to distinguish retention potential within the HVLE segment.
+**Framework:** The study proposes a sequential customer management framework of **transaction value identification, misalignment diagnosis, and internal retention stratification**. Transaction value is first used to identify high-value customers, observable early engagement signals are then used to diagnose value鈥揺ngagement misalignment, and predictive models are subsequently used to distinguish retention potential within the HVLE segment.
 
 **Key Findings:** A greater number of observable early engagement signals was associated with a lower likelihood of fourth-purchase non-completion. Among high-value customers, HVLE customers showed poorer subsequent retention outcomes than high-value, high-engagement (HVHE) customers. Single-category purchasing was associated with a higher likelihood of HVLE membership, whereas exploratory analysis showed that private-brand purchasing was associated with a lower likelihood of HVLE membership. Within the HVLE segment, purchase timing and progression features provided the strongest predictive information for subsequent retention.
 
@@ -46,7 +46,7 @@ The main analyses focus on customers who completed their first three purchases.
 ### Subsequent Retention Outcome
 
 ```text
-survive_yn = 1 -> fourth purchase observed
+noncompletion_yn = 1 - survive_yn -> fourth purchase observed
 survive_yn = 0 -> fourth purchase not observed
 
 churn_yn = 1   -> fourth purchase not observed
@@ -102,7 +102,7 @@ churn_yn ~ engagement_count
 churn_yn ~ engagement_count + log_order_unit_price
 ```
 
-Supplementary analyses include a zero-versus-two-signal comparison and a continuous value × engagement interaction.
+Supplementary analyses include signal-configuration and incremental-value models, together with a continuous value x engagement interaction.
 
 #### H2
 
@@ -122,14 +122,14 @@ The analyses focus on:
 * single-category versus multi-category purchasing; and
 * exploratory associations between private-brand purchasing (`pb_purchase_yn`) and HVLE membership.
 
-### Study 2B: HVLE Retention Prediction
+### Study 2B: HVLE Non-Completion Risk Prediction
 
-Study 2B examines retention heterogeneity within the HVLE segment.
+Study 2B examines fourth-purchase non-completion risk heterogeneity within the HVLE segment.
 
 The prediction target is:
 
 ```text
-survive_yn = 1
+noncompletion_yn = 1 - survive_yn
 ```
 
 The following models are compared:
@@ -142,7 +142,9 @@ Decision Tree
 Multilayer Perceptron
 ```
 
-SHAP is used to interpret the contribution of individual predictors to retention predictions within the HVLE segment.
+The prediction script is `Study_2/survival_prediction/prediction_exam.py`, with shared Stage 3 utilities in `Study_2/survival_prediction/stage3_modeling_utils.py`.
+
+SHAP is implemented in `Study_2/survival_prediction/LR_model_shap.py` to interpret LR predictions within the HVLE segment.
 
 ## Project Structure
 
@@ -150,7 +152,8 @@ SHAP is used to interpret the contribution of individual predictors to retention
 .
 |-- Data preprocessing/
 |   |-- data_cleaning.py
-|   `-- order_unit_price_EDA.py
+|   |-- Data_cleaning_detail.py
+|   `-- order_unit_price_count.py
 |
 |-- Study_1/
 |   |-- Hypothesis Exam/
@@ -159,7 +162,7 @@ SHAP is used to interpret the contribution of individual predictors to retention
 |   |   `-- hypothesis_exam_H2.py
 |   |
 |   `-- supplementary_analysis/
-|       |-- h1_zero_vs_two_signals.py
+|       |-- h1_signal_configuration_and_incremental_value.py
 |       `-- value_engagement_interaction.py
 |
 |-- Study_2/
@@ -170,11 +173,11 @@ SHAP is used to interpret the contribution of individual predictors to retention
 |   |   `-- exploratory_pb_purchase_hvle.py
 |   |
 |   `-- survival_prediction/
-|       |-- survival_exam.py
-|       `-- study2b_shap.py
+|       |-- stage3_modeling_utils.py
+|       |-- prediction_exam.py
+|       `-- LR_model_shap.py
 |
 |-- robustness_exam/
-|   |-- robustness_exam_H1.py
 |   |-- robustness_exam_H2.py
 |   |-- robustness_exam_H3.py
 |   `-- robustness_exam_H4.py

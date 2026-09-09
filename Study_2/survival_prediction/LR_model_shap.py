@@ -1,10 +1,4 @@
-"""SHAP analysis for the overall selected Study 2B HVLE retention model.
-
-The final SHAP model is selected by the Study 2B model-selection rule in
-survival_exam.py: AUC, then precision@20%, then F1-score, then recall. Under
-the current results, this selects Random Forest (RF). SHAP values are then
-computed on a stratified held-out test set only.
-"""
+"""LR SHAP analysis for Study 2B fourth-purchase non-completion risk."""
 
 from pathlib import Path
 import sys
@@ -18,7 +12,6 @@ import numpy as np
 import pandas as pd
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import brier_score_loss, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
@@ -27,12 +20,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.append(str(SCRIPT_DIR))
 
-from survival_exam import (
-    RANDOM_STATE,
+from stage3_modeling_utils import (
     build_models,
     build_preprocessor,
     build_study_2b_retention_features,
-    run_model_comparison,
     split_feature_types,
 )
 
@@ -50,13 +41,58 @@ TEST_SIZE = 0.20
 SHAP_SAMPLE_SIZE = 2000
 BACKGROUND_SAMPLE_SIZE = 500
 TOP_N = 20
+RANDOM_STATE = 42
+SHAP_MODEL_NAME = "LR"
 
 OUTPUT_DIR = (
     Path(__file__).resolve().parents[2]
     / "output"
-    / "study_2b_hvle_retention_shap"
+    / "study_2b_hvle_noncompletion_shap"
 )
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+FEATURE_FAMILIES = {
+    "purchase_cadence": [
+        "days_to_first_purchase_from_signup",
+        "days_to_third_purchase_from_signup",
+        "purchase_interval_mean",
+        "purchase_interval_change",
+    ],
+    "purchase_category": [
+        "purchased_supplies_yn",
+        "purchased_snacks_yn",
+        "purchased_feed_yn",
+        "purchased_essentials_yn",
+        "category_flag_count",
+    ],
+    "brand": [
+        "pb_purchase_yn",
+        "pb_purchase_count_ratio",
+    ],
+    "coupon": [
+        "coupon_used_count_first3",
+        "coupon_dropoff_1_to_3",
+    ],
+    "delivery": [
+        "delivery_time_mean_first3",
+        "delivery_time_max_first3",
+        "delivery_time_change_1_to_3",
+        "sameday_delivery_ratio",
+        "dawn_delivery_ratio",
+        "weekend_order_ratio",
+    ],
+    "pet_characteristics": [
+        "pet_age_group",
+        "pet_species",
+        "pet_breed_detailed",
+        "pet_registered_before_first_purchase_yn",
+    ],
+    "calendar": [
+        "first_purchase_quarter",
+        "is_year_end_first_purchase",
+    ],
+}
 
 
 def to_dense(matrix):
@@ -64,7 +100,7 @@ def to_dense(matrix):
 
 
 def normalize_binary_shap(raw_values):
-    """Return SHAP values for the positive class, survive_yn = 1."""
+    """Return SHAP values for the positive class, noncompletion_yn = 1."""
     if isinstance(raw_values, list):
         return np.asarray(raw_values[1] if len(raw_values) > 1 else raw_values[0])
 
@@ -117,6 +153,13 @@ def aggregate_onehot_importance(shap_importance_df, source_features):
     )
 
 
+def feature_family(source_feature):
+    for family, members in FEATURE_FAMILIES.items():
+        if source_feature in members:
+            return family
+    return "other"
+
+
 def build_model_pipeline(model_name, numeric_features, categorical_features):
     models = build_models()
     if model_name not in models:
@@ -134,38 +177,35 @@ def build_model_pipeline(model_name, numeric_features, categorical_features):
 
 
 def explain_model(fitted_model, X_train_transformed, X_shap):
-    if isinstance(fitted_model, LogisticRegression):
-        background_n = min(BACKGROUND_SAMPLE_SIZE, len(X_train_transformed))
-        rng = np.random.default_rng(RANDOM_STATE)
-        background_positions = rng.choice(
-            len(X_train_transformed),
-            size=background_n,
-            replace=False,
-        )
-        background = X_train_transformed[background_positions]
-        explainer = shap.LinearExplainer(fitted_model, background)
-        return normalize_binary_shap(explainer.shap_values(X_shap)), background_n
+    if not isinstance(fitted_model, LogisticRegression):
+        raise TypeError("This script is configured for LR SHAP only.")
 
-    explainer = shap.TreeExplainer(fitted_model)
-    return normalize_binary_shap(explainer.shap_values(X_shap)), np.nan
+    background_n = min(BACKGROUND_SAMPLE_SIZE, len(X_train_transformed))
+    rng = np.random.default_rng(RANDOM_STATE)
+    background_positions = rng.choice(
+        len(X_train_transformed),
+        size=background_n,
+        replace=False,
+    )
+    background = X_train_transformed[background_positions]
+    explainer = shap.LinearExplainer(fitted_model, background)
+    return normalize_binary_shap(explainer.shap_values(X_shap)), background_n
 
 
 def main():
     feature_data = build_study_2b_retention_features()
     modeling_df = feature_data["modeling_df"].copy()
     feature_cols = feature_data["feature_cols"]
-    target_col = feature_data["target_col"]
+    source_target_col = feature_data["target_col"]
+    target_col = "noncompletion_yn"
 
-    comparison = run_model_comparison(
-        modeling_df=modeling_df,
-        feature_cols=feature_cols,
-        target_col=target_col,
+    modeling_df[source_target_col] = pd.to_numeric(
+        modeling_df[source_target_col],
+        errors="coerce",
     )
-    selected_model_name = comparison["final_model_name"]
-
-    modeling_df[target_col] = pd.to_numeric(modeling_df[target_col], errors="coerce")
-    modeling_df = modeling_df.dropna(subset=[target_col]).copy()
-    modeling_df[target_col] = modeling_df[target_col].astype(int)
+    modeling_df = modeling_df.dropna(subset=[source_target_col]).copy()
+    modeling_df[source_target_col] = modeling_df[source_target_col].astype(int)
+    modeling_df[target_col] = 1 - modeling_df[source_target_col]
 
     numeric_features, categorical_features = split_feature_types(
         modeling_df,
@@ -174,7 +214,7 @@ def main():
     X = modeling_df[feature_cols].copy()
     y = modeling_df[target_col].copy()
 
-    X_train, X_test, y_train, y_test = train_test_split(
+    X_train, X_test, y_train, _ = train_test_split(
         X,
         y,
         test_size=TEST_SIZE,
@@ -185,30 +225,11 @@ def main():
         raise RuntimeError("Training and SHAP test samples overlap.")
 
     pipeline = build_model_pipeline(
-        selected_model_name,
+        SHAP_MODEL_NAME,
         numeric_features,
         categorical_features,
     )
     pipeline.fit(X_train, y_train)
-
-    y_score = pipeline.predict_proba(X_test)[:, 1]
-    y_pred = pipeline.predict(X_test)
-    holdout_metrics = pd.DataFrame(
-        [
-            {
-                "model": selected_model_name,
-                "test_size": TEST_SIZE,
-                "random_state": RANDOM_STATE,
-                "train_n": len(X_train),
-                "test_n": len(X_test),
-                "precision": precision_score(y_test, y_pred, zero_division=0),
-                "recall": recall_score(y_test, y_pred, zero_division=0),
-                "f1": f1_score(y_test, y_pred, zero_division=0),
-                "auc": roc_auc_score(y_test, y_score),
-                "brier_score": brier_score_loss(y_test, y_score),
-            }
-        ]
-    )
 
     preprocessor = pipeline.named_steps["preprocessor"]
     fitted_model = pipeline.named_steps["model"]
@@ -260,52 +281,25 @@ def main():
         if grouped_total > 0
         else np.nan
     )
+    grouped_importance_df["feature_family"] = grouped_importance_df[
+        "source_feature"
+    ].map(feature_family)
 
-    model_slug = selected_model_name.lower()
-    # CSV outputs are intentionally disabled; only SHAP figures are saved.
-    # importance_path = OUTPUT_DIR / f"{model_slug}_shap_importance_holdout.csv"
-    # grouped_importance_path = OUTPUT_DIR / f"{model_slug}_shap_importance_grouped.csv"
-    # metrics_path = OUTPUT_DIR / f"{model_slug}_holdout_metrics.csv"
-    # audit_path = OUTPUT_DIR / f"{model_slug}_shap_sample_audit.csv"
-    bar_plot_path = OUTPUT_DIR / f"{model_slug}_shap_summary_bar.png"
-    beeswarm_plot_path = OUTPUT_DIR / f"{model_slug}_shap_summary_beeswarm.png"
-
-    # shap_importance_df.to_csv(importance_path, index=False, encoding="utf-8-sig")
-    # grouped_importance_df.to_csv(
-    #     grouped_importance_path,
-    #     index=False,
-    #     encoding="utf-8-sig",
-    # )
-    # holdout_metrics.to_csv(metrics_path, index=False, encoding="utf-8-sig")
-    # pd.DataFrame(
-    #     [
-    #         {
-    #             "design": "stratified_80_20_holdout",
-    #             "model": selected_model_name,
-    #             "random_state": RANDOM_STATE,
-    #             "full_n": len(X),
-    #             "train_n": len(X_train),
-    #             "test_n": len(X_test),
-    #             "shap_n": len(X_shap),
-    #             "background_n": background_n,
-    #             "train_test_overlap_n": 0,
-    #             "shap_source": "held_out_predictions_only",
-    #             "selection_rule": "auc_then_precision20_then_f1_then_recall",
-    #         }
-    #     ]
-    # ).to_csv(audit_path, index=False, encoding="utf-8-sig")
-
-    plt.figure()
-    shap.summary_plot(
-        shap_values,
-        X_shap,
-        plot_type="bar",
-        max_display=TOP_N,
-        show=False,
+    family_importance_df = (
+        grouped_importance_df.groupby("feature_family", as_index=False)
+        .agg(mean_abs_shap=("mean_abs_shap", "sum"))
+        .sort_values("mean_abs_shap", ascending=False)
+        .reset_index(drop=True)
     )
-    plt.tight_layout()
-    plt.savefig(bar_plot_path, dpi=300, bbox_inches="tight")
-    plt.close()
+    family_total = family_importance_df["mean_abs_shap"].sum()
+    family_importance_df["shap_share"] = (
+        family_importance_df["mean_abs_shap"] / family_total
+        if family_total > 0
+        else np.nan
+    )
+
+    model_slug = SHAP_MODEL_NAME.lower()
+    beeswarm_plot_path = OUTPUT_DIR / f"{model_slug}_shap_summary_beeswarm.png"
 
     plt.figure()
     shap.summary_plot(
@@ -319,26 +313,28 @@ def main():
     plt.close()
 
     print("\n" + "=" * 80)
-    print("=== STUDY 2B SHAP FOR OVERALL SELECTED MODEL ===")
+    print("=== STUDY 2B LR SHAP FOR NON-COMPLETION RISK ===")
     print("=" * 80)
-    print("Selected model:", selected_model_name)
-    print("Target positive class: survive_yn = 1")
+    print("Selected SHAP model: LR")
+    print("Target: noncompletion_yn")
+    print("Positive class: fourth-purchase non-completion = 1")
+    print("Positive SHAP values indicate higher fourth-purchase non-completion risk.")
+    print("Holdout design: stratified 80/20 split")
+    print("Random state:", RANDOM_STATE)
     print("Full sample size:", len(X))
     print("Training sample size:", len(X_train))
     print("Held-out test sample size:", len(X_test))
     print("SHAP sample size:", len(X_shap))
     print("Training/SHAP overlap: 0")
-    print("\nHoldout metrics:")
-    print(holdout_metrics.round(4).to_string(index=False))
-    print("\nTop grouped source features:")
+    print("\nLR feature-level mean absolute SHAP:")
+    print(shap_importance_df.head(TOP_N).round(6).to_string(index=False))
+    print("\nLR grouped source features:")
     print(grouped_importance_df.head(TOP_N).round(6).to_string(index=False))
+    print("\nLR grouped feature-family SHAP share:")
+    print(family_importance_df.round(6).to_string(index=False))
 
     print("\nSaved:")
-    for path in [
-        bar_plot_path,
-        beeswarm_plot_path,
-    ]:
-        print(path)
+    print(beeswarm_plot_path)
 
 
 if __name__ == "__main__":
