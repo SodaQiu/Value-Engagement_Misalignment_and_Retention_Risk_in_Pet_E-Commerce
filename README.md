@@ -2,13 +2,13 @@
 
 ## Description
 
-The study examines whether observable early engagement signals provide additional information beyond early transaction value for distinguishing subsequent customer outcomes. It further identifies high-value, low-engagement (HVLE) customers as a value-engagement misalignment segment and examines behavioral characteristics and retention heterogeneity within this segment.
+This repository contains the analysis code used to support reproducibility for a study of **value-engagement misalignment and retention heterogeneity in pet e-commerce**.
 
-**Background:** Transaction-based customer segmentation can identify economically important customers, but relatively high early transaction value does not necessarily imply a continuing customer relationship. Observable relationship signals may therefore provide additional information for distinguishing subsequent retention outcomes.
+The study examines whether observable early relationship signals provide additional information beyond early transaction value, and whether high-value, low-engagement (HVLE) customers differ in subsequent fourth-purchase outcomes.
 
-**Framework:** The study proposes a sequential customer management framework of **transaction value identification, misalignment diagnosis, and internal retention stratification**. Transaction value is first used to identify high-value customers, observable early engagement signals are then used to diagnose value-engagement misalignment, and predictive models are subsequently used to distinguish retention potential within the HVLE segment.
+![Research framework](Figure%201.png)
 
-**Key Findings:** A greater number of observable early engagement signals was associated with a lower likelihood of fourth-purchase non-completion. Among high-value customers, HVLE customers showed poorer subsequent retention outcomes than high-value, high-engagement (HVHE) customers. Single-category purchasing was associated with a higher likelihood of HVLE membership, whereas exploratory analysis showed that private-brand purchasing was associated with a lower likelihood of HVLE membership. Within the HVLE segment, purchase timing and progression features provided the strongest predictive information for subsequent retention.
+The analysis follows a three-stage framework: transaction-value identification, value-engagement misalignment diagnosis, and within-segment non-completion risk stratification.
 
 ## Research Framework
 
@@ -21,21 +21,7 @@ LVHE = Low Value, High Engagement
 LVLE = Low Value, Low Engagement
 ```
 
-The analyses examine:
-
-* the relationship between observable early engagement signals and subsequent churn;
-* differences between HVLE and HVHE customers;
-* behavioral characteristics associated with HVLE membership; and
-* retention heterogeneity within the HVLE segment.
-
-## Data Source
-
-This study uses a publicly available pet e-commerce dataset released by Song (2025).
-
-* GitHub: https://github.com/opusdeisong/Prediction-of-Private-Brand-Purchases-
-* Zenodo: https://doi.org/10.5281/zenodo.16296754
-
-The original dataset is not redistributed in this repository and can be obtained directly from the sources above.
+The analyses compare subsequent churn across engagement groups, examine behavioral characteristics associated with HVLE membership, and predict non-completion risk within the HVLE segment.
 
 ## Core Variable Definitions
 
