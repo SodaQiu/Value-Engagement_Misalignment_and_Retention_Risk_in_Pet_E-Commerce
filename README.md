@@ -2,13 +2,13 @@
 
 ## Description
 
-This repository contains the analysis code used to support reproducibility for a study of **value鈥揺ngagement misalignment and retention heterogeneity in pet e-commerce**.
+This repository contains the analysis code used to support reproducibility for a study of **value-engagement misalignment and retention heterogeneity in pet e-commerce**.
 
-The study examines whether observable early engagement signals provide additional information beyond early transaction value for distinguishing subsequent customer outcomes. It further identifies high-value, low-engagement (HVLE) customers as a value鈥揺ngagement misalignment segment and examines behavioral characteristics and retention heterogeneity within this segment.
+The study examines whether observable early engagement signals provide additional information beyond early transaction value for distinguishing subsequent customer outcomes. It further identifies high-value, low-engagement (HVLE) customers as a value-engagement misalignment segment and examines behavioral characteristics and retention heterogeneity within this segment.
 
 **Background:** Transaction-based customer segmentation can identify economically important customers, but relatively high early transaction value does not necessarily imply a continuing customer relationship. Observable relationship signals may therefore provide additional information for distinguishing subsequent retention outcomes.
 
-**Framework:** The study proposes a sequential customer management framework of **transaction value identification, misalignment diagnosis, and internal retention stratification**. Transaction value is first used to identify high-value customers, observable early engagement signals are then used to diagnose value鈥揺ngagement misalignment, and predictive models are subsequently used to distinguish retention potential within the HVLE segment.
+**Framework:** The study proposes a sequential customer management framework of **transaction value identification, misalignment diagnosis, and internal retention stratification**. Transaction value is first used to identify high-value customers, observable early engagement signals are then used to diagnose value-engagement misalignment, and predictive models are subsequently used to distinguish retention potential within the HVLE segment.
 
 **Key Findings:** A greater number of observable early engagement signals was associated with a lower likelihood of fourth-purchase non-completion. Among high-value customers, HVLE customers showed poorer subsequent retention outcomes than high-value, high-engagement (HVHE) customers. Single-category purchasing was associated with a higher likelihood of HVLE membership, whereas exploratory analysis showed that private-brand purchasing was associated with a lower likelihood of HVLE membership. Within the HVLE segment, purchase timing and progression features provided the strongest predictive information for subsequent retention.
 
@@ -46,8 +46,10 @@ The main analyses focus on customers who completed their first three purchases.
 ### Subsequent Retention Outcome
 
 ```text
-noncompletion_yn = 1 - survive_yn -> fourth purchase observed
+survive_yn = 1 -> fourth purchase observed
 survive_yn = 0 -> fourth purchase not observed
+
+noncompletion_yn = 1 - survive_yn -> fourth purchase not observed
 
 churn_yn = 1   -> fourth purchase not observed
 churn_yn = 0   -> fourth purchase observed
@@ -190,3 +192,4 @@ SHAP is implemented in `Study_2/survival_prediction/LR_model_shap.py` to interpr
 ## Conclusion
 
 Based on the above results, this study proposes a customer management framework of **transaction value identification, misalignment diagnosis, and internal retention stratification**. This framework can provide a basis for pet e-commerce platforms to further differentiate high-value customers and optimize the allocation of limited customer retention resources.
+
